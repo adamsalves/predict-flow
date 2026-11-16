@@ -1,6 +1,6 @@
 # ADR-0007: Contrato OpenAPI e codegen TypeScript
 
-- Status: Aceito (decidido)
+- Status: Aceito
 - Data: 2026-11-16
 
 ## Contexto
@@ -8,6 +8,8 @@
 API FastAPI e frontend Angular são desenvolvidos em paralelo. Sem contrato de tipos compartilhado, o frontend cria interfaces à mão a partir de chamadas de exemplo — que divergem da API silenciosamente a cada mudança, quebrando telas em runtime.
 
 ## Decisão
+
+Esta decisão já estava tomada antes da implementação — esta ADR a registra formalmente (status: decidido, harmonizado com #11).
 
 - A OpenAPI gerada pela FastAPI é o **contrato oficial** entre backend e frontend.
 - O frontend **não escreve interfaces de API à mão**: os types TypeScript são **gerados por codegen** a partir da OpenAPI (implementação na issue #11).

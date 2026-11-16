@@ -9,7 +9,7 @@ O caminho até dados reais de clientes cruza uma fronteira clara: a demo local �
 
 ## Decisão
 
-**Demo local (esta fase, issues #1–#16):**
+**Demo local (esta fase — milestones M1–M4, da fundação até a jornada vertical local):**
 - Sem JWT no caminho crítico: a demo roda local, com dados públicos ou sintéticos.
 - Sem dados reais, em hipótese alguma, antes do gate de piloto.
 - **v1 explicitamente single-tenant**: nenhum mecanismo de tenancy entra no desenho agora.
@@ -29,5 +29,5 @@ O caminho até dados reais de clientes cruza uma fronteira clara: a demo local �
 
 ## Consequências
 
-- Issues #2–#16 não carregam auth; a #17 é o portão deliberado que introduz segurança de produção de uma só vez, revisada como mudança crítica.
+- Issues de M1–M4 não carregam auth; a #17 (M5) é o portão deliberado que introduz segurança de produção de uma só vez, revisada como mudança crítica.
 - Documentação e compose da demo devem deixar claro que o ambiente é local/demo, não pronto para dados reais (critério de aceite da #2).

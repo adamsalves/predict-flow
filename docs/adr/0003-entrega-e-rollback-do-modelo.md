@@ -25,4 +25,4 @@ O sistema precisa trocar a versão ativa do modelo de forma controlada e revert�
 
 - Rollback é imediato e reproduzível (apontar config + restart), ao custo de um restart por troca de versão.
 - A verificação SHA-256 antes do `joblib.load` é um ponto de segurança: protege contra artefato corrompido ou adulterado.
-- Múltiplas versões coexistem no volume; a política de retenção de versões antigas fica para o gate de piloto.
+- Múltiplas versões coexistem no volume; a política de retenção de versões antigas é decisão operacional posterior, fora do escopo desta ADR.

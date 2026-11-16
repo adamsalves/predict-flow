@@ -22,6 +22,6 @@ O sistema recomenda ações de retenção e registra seus outcomes. Há uma arma
 
 ## Consequências
 
-- Telas de decisão/ação (#19, #20) exibem outcomes observados com ressalva explícita de não-causalidade.
+- Telas de decisão/ação (#19 API, #20 UI) exibem outcomes observados com ressalva explícita de não-causalidade.
 - O caminho para medir eficácia real é o desenho controlado — requisito do piloto, não da demo.
 - Métricas descritivas por ação continuam úteis para operação (SLA, cobertura, custo), desde que rotuladas corretamente.

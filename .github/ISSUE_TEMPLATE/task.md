@@ -5,6 +5,8 @@ title: 'feat(scope): '
 labels: [type:feat]
 ---
 
+<!-- Título: use `feat(scope): ` ou `chore(scope): ` (e a label `type:chore`) conforme o tipo da tarefa. -->
+
 **ADRs:** — · **Design:** — · **Depende de:** —
 
 ### Contexto

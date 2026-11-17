@@ -1,0 +1,176 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão semver sem o v (ex.: 0.1.0) — fecha um minor de milestone"
+        required: true
+        type: string
+
+# Uma release por vez: duas execuções concorrentes quebrariam tag/changelog.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Pré-condição: CI verde na ref do dispatch (main, quando disparada no fechamento do milestone).
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: v${{ inputs.version }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validar versão e ausência da tag
+        run: |
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Versão inválida: '${{ inputs.version }}' (esperado semver sem o v, ex.: 0.1.0)"; exit 1; }
+          git fetch --tags origin
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION já existe"
+            exit 1
+          fi
+
+      - name: Gerar notas da release e entrada do changelog
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+
+          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="$PREV_TAG..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          echo "Tag anterior: ${PREV_TAG:-<nenhuma>}; range: $RANGE"
+
+          git log "$RANGE" --no-merges --pretty=format:'%s' > /tmp/subjects.txt
+          mapfile -t SUBJECTS < /tmp/subjects.txt
+
+          added=(); changed=(); fixed=()
+          for s in "${SUBJECTS[@]}"; do
+            type="${s%%:*}"
+            case "$type" in
+              feat)  added+=("$s") ;;
+              fix)   fixed+=("$s") ;;
+              *)     changed+=("$s") ;;
+            esac
+          done
+
+          write_group() {
+            local title="$1"; shift
+            local items=()
+            local a
+            for a in "$@"; do
+              [ -n "$a" ] && items+=("$a")
+            done
+            if [ "${#items[@]}" -gt 0 ]; then
+              echo "### $title"
+              printf -- '- %s\n' "${items[@]}"
+              echo
+            fi
+          }
+
+          # Issues fechadas pelos PRs squash-merged no range (via closingIssuesReferences).
+          ISSUES=""
+          PRS=$(grep -oP '\(#\d+\)' /tmp/subjects.txt | grep -oP '\d+' | sort -un || true)
+          if [ -n "$PRS" ]; then
+            for pr in $PRS; do
+              refs=$(gh api graphql \
+                -f query='query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){closingIssuesReferences(first:20){nodes{number title}}}}}' \
+                -F owner="$OWNER" -F repo="$REPO" -F n="$pr" \
+                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.number)\t\(.title)"' 2>/dev/null | grep -P '^\d+\t' || true)
+              ISSUES+="$refs"$'\n'
+            done
+            ISSUES=$(printf '%s' "$ISSUES" | sed '/^\s*$/d' | sort -u -n -k1,1 || true)
+          fi
+
+          write_issues() {
+            if [ -n "$ISSUES" ]; then
+              echo "### Issues encerradas"
+              while IFS=$'\t' read -r num title; do
+                echo "- [#$num](https://github.com/$OWNER/$REPO/issues/$num) $title"
+              done <<< "$ISSUES"
+              echo
+            fi
+          }
+
+          {
+            write_group "Adicionado" "${added[@]:-}"
+            write_group "Alterado" "${changed[@]:-}"
+            write_group "Corrigido" "${fixed[@]:-}"
+            write_issues
+            echo "Changelog completo em [\`CHANGELOG.md\`](https://github.com/$OWNER/$REPO/blob/main/CHANGELOG.md)."
+          } > /tmp/release_notes.md
+
+          {
+            echo "## [$VERSION] - $(date +%F)"
+            echo
+            write_group "Adicionado" "${added[@]:-}"
+            write_group "Alterado" "${changed[@]:-}"
+            write_group "Corrigido" "${fixed[@]:-}"
+            write_issues
+          } > /tmp/changelog_entry.md
+
+          # Link de comparação: tag anterior, ou o primeiro commit na release inicial.
+          if [ -n "$PREV_TAG" ]; then
+            BASE="$PREV_TAG"
+          else
+            BASE=$(git rev-list --max-parents=0 HEAD | tail -n1)
+          fi
+          echo "[$VERSION]: https://github.com/$OWNER/$REPO/compare/$BASE...$VERSION" > /tmp/compare_link.txt
+
+          echo "::group::Notas da release"
+          cat /tmp/release_notes.md
+          echo "::endgroup::"
+
+      - name: Atualizar CHANGELOG.md
+        run: |
+          set -euo pipefail
+          if [ ! -f CHANGELOG.md ]; then
+            {
+              echo "# Changelog"
+              echo
+              echo "Todas as mudanças notáveis deste projeto são documentadas aqui, no formato [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). O versionamento é [semver atrelado aos milestones](README.md#versões-e-releases) do projeto."
+              echo
+              echo "<!-- novas releases são inseridas imediatamente abaixo deste marcador -->"
+              echo
+              echo "<!-- compare-links -->"
+            } > CHANGELOG.md
+          fi
+          awk -v f=/tmp/changelog_entry.md \
+            '/<!-- novas releases/{while((getline line<f)>0) print line} 1' CHANGELOG.md > /tmp/changelog_new.md
+          mv /tmp/changelog_new.md CHANGELOG.md
+          awk -v f=/tmp/compare_link.txt \
+            '/<!-- compare-links/{while((getline line<f)>0) print line} 1' CHANGELOG.md > /tmp/changelog_new.md
+          mv /tmp/changelog_new.md CHANGELOG.md
+
+      - name: Commitar CHANGELOG.md na main
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: changelog $VERSION"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Criar tag anotada
+        run: |
+          set -euo pipefail
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "refs/tags/$VERSION"
+
+      - name: Publicar GitHub Release
+        run: gh release create "$VERSION" --title "$VERSION" --notes-file /tmp/release_notes.md

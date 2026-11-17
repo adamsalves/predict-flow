@@ -64,7 +64,7 @@ Sem Postgres disponível, o teste de health contra DB real é pulado automaticam
 
 ```
 predict-flow/
-├── .github/workflows/   # CI (pytest + Postgres)
+├── .github/workflows/   # CI (pytest + Postgres) e release por milestone
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/      # rotas (health)
@@ -83,6 +83,12 @@ predict-flow/
 ## Roadmap
 
 Os milestones M1 (fundação) → M6 (extras) são rastreados nas [issues do GitHub](https://github.com/adamsalves/predict-flow/issues) e nos milestones do repositório.
+
+## Versões e releases
+
+- Versionamento semver atrelado aos milestones: cada milestone fecha um minor — M1 → `v0.1.0`, M2 → `v0.2.0`, ..., M5 (piloto) → `v1.0.0`; hotfixes dentro de um milestone usam patch (`v0.1.1`).
+- A release é uma decisão de fechamento de milestone, não automática por merge. Quando o milestone fecha, dispara-se manualmente o workflow **release** (Actions → release) informando a versão sem o `v`.
+- O workflow só executa com CI verde na `main` (reusa o workflow `ci`), cria a tag anotada `v<versão>` no HEAD da `main`, atualiza o [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog, commitado de volta no repo) e publica a GitHub Release com notas geradas dos squash merges (Conventional Commits) e das issues encerradas no milestone.
 
 ## Quando disponíveis
 

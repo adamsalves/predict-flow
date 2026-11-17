@@ -62,6 +62,8 @@ Sem Postgres disponível, o teste de health contra DB real é pulado automaticam
 
 ## Estrutura do monorepo
 
+Convenções de código, regras de contribuição e contexto para agentes de IA estão em [AGENTS.md](AGENTS.md).
+
 ```
 predict-flow/
 ├── .github/workflows/   # CI (pytest + Postgres) e release por milestone

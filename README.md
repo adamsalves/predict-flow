@@ -20,6 +20,7 @@ As decisões arquiteturais e científicas estão registradas em [`docs/adr/`](do
 ## Pré-requisitos
 
 - Docker com Docker Compose (v2)
+- `curl` (para os health checks do quickstart)
 
 ## Quickstart
 
@@ -91,4 +92,3 @@ Estas etapas entram em milestones futuros e serão documentadas aqui quando exis
 - **Treino do pipeline ML** — a partir das issues de ML (M2+)
 - **Verificação de integridade do artefato** — a partir da #15
 - **Frontend** — a partir da #12
-EOF

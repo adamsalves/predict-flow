@@ -20,7 +20,7 @@ services:
   backend:
     build: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg://predict:predict@db:5432/predict_flow
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-predict}:${POSTGRES_PASSWORD:-predict}@db:5432/${POSTGRES_DB:-predict_flow}
       MODEL_PATH: /models
       CORS_ORIGINS: '["http://localhost:4200"]'
     ports:

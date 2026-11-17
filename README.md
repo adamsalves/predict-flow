@@ -33,7 +33,7 @@ docker compose up --build -d
 Aguarde o backend ficar pronto (o primeiro boot leva alguns segundos) e verifique os health checks:
 
 ```bash
-until curl -sf http://127.0.0.1:8000/api/v1/health/live; do sleep 2; done
+until curl -sf http://127.0.0.1:8000/api/v1/health/live; do sleep 2; done  # interrompa com Ctrl+C se passar de ~1 min
 
 curl http://127.0.0.1:8000/api/v1/health/live    # sempre 200
 curl http://127.0.0.1:8000/api/v1/health/ready   # 200 com Postgres, 503 sem
@@ -90,5 +90,5 @@ Estas etapas entram em milestones futuros e serão documentadas aqui quando exis
 
 - **Migrations (Alembic)** — a partir da #7
 - **Treino do pipeline ML** — a partir das issues de ML (M2+)
-- **Verificação de integridade do artefato** — a partir da #15
+- **Verificação de integridade do artefato** — a partir da #8 (usada pelo readiness na #15)
 - **Frontend** — a partir da #12

@@ -55,7 +55,8 @@ jobs:
           fi
           echo "Tag anterior: ${PREV_TAG:-<nenhuma>}; range: $RANGE"
 
-          git log "$RANGE" --no-merges --pretty=format:'%s' > /tmp/subjects.txt
+          # O commit de changelog da release anterior fica fora das notas (não é mudança do produto).
+          git log "$RANGE" --no-merges --invert-grep --grep='^docs: changelog v' --pretty=format:'%s' > /tmp/subjects.txt
           mapfile -t SUBJECTS < /tmp/subjects.txt
 
           added=(); changed=(); fixed=()
@@ -90,7 +91,7 @@ jobs:
               if ! refs=$(gh api graphql \
                 -f query='query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){closingIssuesReferences(first:20){nodes{number title}}}}}' \
                 -F owner="$OWNER" -F repo="$REPO" -F n="$pr" \
-                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.number)\t\(.title)"' 2>/dev/null); then
+                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.number)\t\(.title)"'); then
                 echo "::error::Falha ao consultar issues encerradas do PR #$pr — abortando para não publicar release sem essa seção"
                 exit 1
               fi

@@ -1,1 +1,6 @@
 .kimi-code/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env

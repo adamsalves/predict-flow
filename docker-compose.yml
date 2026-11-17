@@ -1,0 +1,33 @@
+# Ambiente local de demo (ADR-0010): não expor para dados reais nem à rede
+# externa. Credenciais abaixo são defaults de desenvolvimento local apenas.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-predict}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-predict}
+      POSTGRES_DB: ${POSTGRES_DB:-predict_flow}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-predict} -d $${POSTGRES_DB:-predict_flow}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://predict:predict@db:5432/predict_flow
+      MODEL_PATH: /models
+      CORS_ORIGINS: '["http://localhost:4200"]'
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

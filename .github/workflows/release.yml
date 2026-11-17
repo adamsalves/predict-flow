@@ -35,7 +35,7 @@ jobs:
 
       - name: Validar versão e ausência da tag
         run: |
-          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Versão inválida: '${{ inputs.version }}' (esperado semver sem o v, ex.: 0.1.0)"; exit 1; }
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Versão inválida: '$VERSION' (esperado semver sem o v no input, ex.: 0.1.0)"; exit 1; }
           git fetch --tags origin
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
             echo "::error::Tag $VERSION já existe"
@@ -87,10 +87,14 @@ jobs:
           PRS=$(grep -oP '\(#\d+\)' /tmp/subjects.txt | grep -oP '\d+' | sort -un || true)
           if [ -n "$PRS" ]; then
             for pr in $PRS; do
-              refs=$(gh api graphql \
+              if ! refs=$(gh api graphql \
                 -f query='query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$n){closingIssuesReferences(first:20){nodes{number title}}}}}' \
                 -F owner="$OWNER" -F repo="$REPO" -F n="$pr" \
-                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.number)\t\(.title)"' 2>/dev/null | grep -P '^\d+\t' || true)
+                --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.number)\t\(.title)"' 2>/dev/null); then
+                echo "::error::Falha ao consultar issues encerradas do PR #$pr — abortando para não publicar release sem essa seção"
+                exit 1
+              fi
+              refs=$(printf '%s' "$refs" | grep -P '^\d+\t' || true)
               ISSUES+="$refs"$'\n'
             done
             ISSUES=$(printf '%s' "$ISSUES" | sed '/^\s*$/d' | sort -u -n -k1,1 || true)
@@ -136,8 +140,14 @@ jobs:
           echo "::endgroup::"
 
       - name: Atualizar CHANGELOG.md
+        id: changelog
         run: |
           set -euo pipefail
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md 2>/dev/null; then
+            echo "Entrada $VERSION já existe no CHANGELOG (run anterior falhou após o commit) — pulando atualização"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ ! -f CHANGELOG.md ]; then
             {
               echo "# Changelog"
@@ -155,8 +165,10 @@ jobs:
           awk -v f=/tmp/compare_link.txt \
             '/<!-- compare-links/{while((getline line<f)>0) print line} 1' CHANGELOG.md > /tmp/changelog_new.md
           mv /tmp/changelog_new.md CHANGELOG.md
+          echo "updated=true" >> "$GITHUB_OUTPUT"
 
       - name: Commitar CHANGELOG.md na main
+        if: steps.changelog.outputs.updated == 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

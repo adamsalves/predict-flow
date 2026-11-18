@@ -15,7 +15,7 @@ Predição de churn e suporte a decisões de retenção, com explicabilidade e a
 
 O eixo do MVP: `importar → pontuar → priorizar → abrir cliente → decidir/registrar ação → observar outcome → avaliar`. O formulário de inferência é apenas sandbox.
 
-As decisões arquiteturais e científicas estão registradas em [`docs/adr/`](docs/adr/README.md) — fonte da verdade do projeto (11 ADRs, todas aceitas).
+As decisões arquiteturais e científicas estão registradas em [`docs/adr/`](docs/adr/README.md) — fonte da verdade do projeto (19 ADRs; a ADR-0004 é parcialmente superada pela ADR-0018).
 
 ## Pré-requisitos
 

@@ -3,3 +3,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+tests/
+models/
+data/
+datasets/
+*.joblib
+*.parquet
+mlruns/
+.mypy_cache/
+.ruff_cache/

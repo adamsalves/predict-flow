@@ -4,3 +4,20 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+
+# ML artifacts and datasets (ADR-0017)
+/models/
+/backend/models/
+/data/
+/datasets/
+/backend/data/
+/backend/datasets/
+*.joblib
+*.parquet
+mlruns/
+.coverage
+htmlcov/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/

@@ -1,0 +1,9 @@
+# Training environment dependencies (input for pip-compile).
+# Reuses the production runtime lock so the training environment resolves the
+# exact same versions of the shared pipeline libraries (scikit-learn, joblib)
+# as serving; parity is verified automatically by
+# scripts/check_dependency_parity.py (see ADR-0017). Training-only
+# dependencies from issues #5/#6 will be added here.
+-r requirements.txt
+scikit-learn
+joblib

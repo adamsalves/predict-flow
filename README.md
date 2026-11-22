@@ -74,7 +74,7 @@ Para atualizar os locks após mudar um `.in`, compile arquivo por arquivo com a 
 
 ```bash
 docker run --rm -v "$PWD/backend:/src" -w /src python:3.12-slim \
-  sh -c "pip install pip-tools && pip-compile requirements.in && pip-compile requirements-dev.in && pip-compile requirements-train.in"
+  sh -c "pip install "pip-tools==7.5.1" && pip-compile requirements.in && pip-compile requirements-dev.in && pip-compile requirements-train.in"
 ```
 
 Qualidade local (gate da CI = ruff + mypy + pytest + checks de paridade e proteção):

@@ -45,8 +45,12 @@ def read_lock(path: Path) -> dict[str, str]:
 
 
 def main() -> int:
-    serving = read_lock(SERVING_LOCK)
-    training = read_lock(TRAINING_LOCK)
+    try:
+        serving = read_lock(SERVING_LOCK)
+        training = read_lock(TRAINING_LOCK)
+    except FileNotFoundError as exc:
+        print(f"Dependency parity check FAILED: {exc}", file=sys.stderr)
+        return 1
 
     shared = sorted(set(serving) & set(training))
     mismatched = [

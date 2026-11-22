@@ -13,7 +13,7 @@ def _digest_of(items: list[dict[str, object]]) -> str:
         {"dtype": item["dtype"], "name": item["name"], "required": item["required"]}
         for item in items
     ]
-    payload = json.dumps(canonical, separators=(",", ":"))
+    payload = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

@@ -79,7 +79,9 @@ class SplitMetrics:
                 "historical label; roc_auc = roc_auc_score; pr_auc = "
                 "average_precision_score; brier = brier_score_loss; "
                 "ci95 = percentile bootstrap, n_boot=1000 with seeded rng; "
-                "calibration = quantile bins on predicted probability"
+                "degenerate resamples (a single class present) are dropped "
+                "from the bootstrap; calibration = quantile bins on "
+                "predicted probability"
             ),
         }
 

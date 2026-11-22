@@ -10,13 +10,16 @@ dataset's provenance.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
 
 from training.dataset import DatasetProvenance
-from training.features import feature_schema_digest
+from training.features import FEATURES, feature_schema_digest
 from training.splits import split_dataset
 from training.tests.conftest import FrameFactory
 from training.train import MANIFEST_FILENAME, MODEL_FILENAME, train
@@ -115,6 +118,10 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
         "max_iter": 1000,
         "solver": "lbfgs",
     }
+    assert written["model"]["threshold"] is None
+    assert written["model"]["calibration_parameters"] is None
+    assert "issue #11" in written["model"]["decision_policy"]
+    assert "base_rate" not in written["target"]  # lives under metrics only
 
     validation = written["metrics"]["validation"]
     test_final = written["metrics"]["test_final"]
@@ -147,6 +154,58 @@ def test_split_digests_match_recompute(
     assert written["splits"]["test"]["ids_sha256"] == expected.test_meta.ids_sha256
 
 
+def test_manifest_artifact_sha256_matches_written_file(
+    make_frame: FrameFactory, tmp_path: Path
+) -> None:
+    _run(make_frame, tmp_path / "models")
+    model_path = tmp_path / "models" / _VERSION / MODEL_FILENAME
+    written = json.loads(
+        (tmp_path / "models" / _VERSION / MANIFEST_FILENAME).read_text()
+    )
+    expected = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    assert written["model"]["artifact_sha256"] == expected
+
+
+def test_model_joblib_loads_outside_repo_import_path(
+    make_frame: FrameFactory, tmp_path: Path
+) -> None:
+    """The artifact must load and predict without the ``training`` package
+    on sys.path (ADR-0001/ADR-0017): the pickle references only
+    sklearn/numpy classes, never training code or lambdas."""
+    df = make_frame(45, 15)
+    train(
+        df=df,
+        provenance=_provenance(),
+        model="lr",
+        seed=_SEED,
+        version=_VERSION,
+        output_dir=tmp_path / "models",
+    )
+    model_path = tmp_path / "models" / _VERSION / MODEL_FILENAME
+    feature_names = [spec.name for spec in FEATURES]
+    input_csv = tmp_path / "scoring_input.csv"
+    df.head(3)[feature_names].to_csv(input_csv, index=False)
+
+    script = (
+        "import joblib\n"
+        "import pandas as pd\n"
+        f"df = pd.read_csv({str(input_csv)!r})\n"
+        f"pipe = joblib.load({str(model_path)!r})\n"
+        "proba = pipe.predict_proba(df)\n"
+        "assert proba.shape[0] == 3\n"
+        "print('PORTABILITY_OK')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "PORTABILITY_OK" in result.stdout
+
+
 def test_logical_determinism_same_seed(
     make_frame: FrameFactory, tmp_path: Path
 ) -> None:
@@ -164,6 +223,10 @@ def test_logical_determinism_same_seed(
         block["training"].pop("duration_fit_seconds")
         block["training"].pop("duration_total_seconds")
         block["git"] = {"commit": "pinned", "dirty": False}
+        # Binary artifact equality is explicitly not part of logical
+        # determinism (see the manifest determinism note); the hash stays a
+        # string and is verified against the on-disk file elsewhere.
+        block["model"].pop("artifact_sha256")
     assert stable_a == stable_b
 
     # Explicit metric comparison under documented tolerances.

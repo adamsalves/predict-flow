@@ -62,10 +62,14 @@ CATEGORICAL_FEATURES: tuple[str, ...] = tuple(
 
 
 def feature_schema_digest() -> str:
-    """SHA-256 of the canonical feature representation (order-sensitive)."""
+    """SHA-256 of the canonical feature representation (order-sensitive).
+
+    Keys are sorted at serialization time so the digest depends only on the
+    contract content, never on the literal order of dict keys in source.
+    """
     canonical = [
         {"dtype": spec.dtype, "name": spec.name, "required": spec.required}
         for spec in FEATURES
     ]
-    payload = json.dumps(canonical, separators=(",", ":"))
+    payload = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -45,7 +45,7 @@ jobs:
         run: python scripts/check_dependency_parity.py
       - name: Verificar proteção de artefatos
         run: bash scripts/check_artifact_ignores.sh
-      - name: Smoke de treino (baseline LR)
-        run: python -m training.train --model lr --version ci-smoke --output-dir /tmp/pf-models
       - name: pytest
         run: pytest -q
+      - name: Smoke de treino (baseline LR)
+        run: python -m training.train --model lr --version ci-smoke --output-dir /tmp/pf-models

@@ -29,7 +29,12 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from training.dataset import DatasetProvenance, canonical_provenance, load_dataset
+from training.dataset import (
+    DatasetProvenance,
+    canonical_provenance,
+    load_dataset,
+    sha256_file,
+)
 from training.features import (
     FEATURE_SCHEMA_VERSION,
     FEATURES,
@@ -61,6 +66,11 @@ TARGET_LIMITATIONS = (
     "be derived from this dataset."
 )
 TEST_NOTE = "final evaluation only; not used for model selection"
+DECISION_POLICY_NOTE = (
+    "decision threshold and calibration parameters are not defined in this "
+    "phase; the decision policy (ADR-0011) lands with issue #11; scores are "
+    "probabilities of the historical label"
+)
 DETERMINISM_NOTE = (
     "logical determinism: same seed+dataset reproduces metrics and split "
     "digests; binary equality of the artifact across environments is not "
@@ -153,6 +163,7 @@ def _build_manifest(
     test_metrics: SplitMetrics,
     duration_fit: float,
     duration_total: float,
+    artifact_sha256: str,
 ) -> dict[str, object]:
     test_block = test_metrics.to_dict()
     test_block["note"] = TEST_NOTE
@@ -173,7 +184,6 @@ def _build_manifest(
         "target": {
             "label": TARGET,
             "encoding": {"No": 0, "Yes": 1},
-            "base_rate": val_metrics.base_rate,
             "definition": TARGET_DEFINITION,
             "limitations": TARGET_LIMITATIONS,
         },
@@ -199,6 +209,10 @@ def _build_manifest(
         "model": {
             "type": "LogisticRegression" if model == "lr" else model,
             "hyperparameters": {"C": 1.0, "max_iter": 1000, "solver": "lbfgs"},
+            "artifact_sha256": artifact_sha256,
+            "threshold": None,
+            "calibration_parameters": None,
+            "decision_policy": DECISION_POLICY_NOTE,
         },
         "metrics": {
             "validation": val_metrics.to_dict(),
@@ -262,6 +276,13 @@ def train(
 
     git_commit, git_dirty = _git_info()
     duration_total = time.perf_counter() - started
+
+    version_dir = output_dir / version
+    version_dir.mkdir(parents=True, exist_ok=True)
+    model_path = version_dir / MODEL_FILENAME
+    joblib.dump(pipeline, model_path)
+    artifact_sha256 = sha256_file(model_path)
+
     manifest = _build_manifest(
         provenance=provenance,
         model=model,
@@ -275,11 +296,8 @@ def train(
         test_metrics=test_metrics,
         duration_fit=duration_fit,
         duration_total=duration_total,
+        artifact_sha256=artifact_sha256,
     )
-
-    version_dir = output_dir / version
-    version_dir.mkdir(parents=True, exist_ok=True)
-    joblib.dump(pipeline, version_dir / MODEL_FILENAME)
     (version_dir / MANIFEST_FILENAME).write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )

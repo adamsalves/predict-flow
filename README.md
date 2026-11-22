@@ -52,13 +52,42 @@ Credenciais e portas são defaults de desenvolvimento local apenas (`127.0.0.1`)
 Com Python 3.12+:
 
 ```bash
-cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r backend/requirements-dev.txt
+cd backend
 pytest
 ```
 
 Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade.
+
+## Qualidade e locks de dependências
+
+Os ambientes são reprodutíveis a partir de locks compilados com pip-tools (ADR-0017), em `backend/`:
+
+- `requirements.txt` — runtime de produção (é o que a imagem Docker instala, sem deps de teste);
+- `requirements-dev.txt` — runtime + testes, ruff, mypy e pip-tools;
+- `requirements-train.txt` — runtime + dependências de treino.
+
+scikit-learn e joblib são bibliotecas compartilhadas entre treino e serving (o treino serializa `model.joblib` e o serving carrega via `joblib.load`): as versões exatas vivem no lock de runtime e a paridade entre treino e serving é verificada automaticamente.
+
+Para atualizar os locks após mudar um `.in`, compile arquivo por arquivo com a mesma versão do Python da CI e da imagem (3.12):
+
+```bash
+docker run --rm -v "$PWD/backend:/src" -w /src python:3.12-slim \
+  sh -c "pip install pip-tools && pip-compile requirements.in && pip-compile requirements-dev.in && pip-compile requirements-train.in"
+```
+
+Qualidade local (gate da CI = ruff + mypy + pytest + checks de paridade e proteção):
+
+```bash
+cd backend
+ruff check .
+mypy
+pytest
+cd ..
+python scripts/check_dependency_parity.py
+bash scripts/check_artifact_ignores.sh
+```
 
 ## Estrutura do monorepo
 
@@ -66,7 +95,7 @@ Convenções de código, regras de contribuição e contexto para agentes de IA 
 
 ```
 predict-flow/
-├── .github/workflows/   # CI (pytest + Postgres) e release por milestone
+├── .github/workflows/   # CI (ruff, mypy, pytest + Postgres) e release por milestone
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/      # rotas (health)
@@ -77,7 +106,9 @@ predict-flow/
 │   │   └── services/    # (fase ML)
 │   ├── tests/           # pytest
 │   ├── Dockerfile
-│   └── requirements.txt
+│   ├── pyproject.toml   # ruff e mypy
+│   └── requirements*.{in,txt}  # locks pip-tools (runtime, dev, train)
+├── scripts/             # checks de paridade de dependências e proteção de artefatos
 ├── docs/adr/            # decisões arquiteturais e científicas
 └── docker-compose.yml   # backend + Postgres (demo local)
 ```

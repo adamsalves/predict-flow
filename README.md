@@ -53,12 +53,27 @@ Com Python 3.12+:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements-dev.txt
-cd backend
+pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade.
+Os locks de dev e treino são instalados juntos: os testes de `training/` exigem `pandas`, que é dependência exclusiva de treino (ADR-0017).
+
+Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade. O teste de download do dataset Telco também se auto-pula offline.
+
+## Treino do modelo (baseline)
+
+O baseline obrigatório (ADR-0004) é uma LogisticRegression em um Pipeline sklearn único, com splits estratificados por target e disjuntos por cliente, avaliação final separada no teste e manifesto completo (ADR-0002, ADR-0009, ADR-0013, ADR-0017):
+
+```bash
+python -m training.train --model lr
+```
+
+Os artefatos vão para `models/<version>/` (gitignored, ADR-0017): `model.joblib` + `model_meta.json`, com seed, commit, SHA-256 do dataset, licença, digests dos splits, versão e digest do contrato de features, métricas com incerteza e orçamento de treino.
+
+**Dataset**: IBM Telco Customer Churn — 7.043 clientes, um registro histórico por cliente, distribuído no repositório [`IBM/telco-customer-churn-on-icp4d`](https://github.com/IBM/telco-customer-churn-on-icp4d) sob Apache License 2.0. O SHA-256 do arquivo é fixado em `training/dataset.py` e verificado em toda execução.
+
+**Rótulo histórico**: o manifesto e a saída do treino descrevem o Telco explicitamente como histórico, sem horizonte prospectivo — os scores são probabilidades do rótulo histórico, não "churn em X dias" (ADR-0009).
 
 ## Qualidade e locks de dependências
 
@@ -70,21 +85,19 @@ Os ambientes são reprodutíveis a partir de locks compilados com pip-tools (ADR
 
 scikit-learn e joblib são bibliotecas compartilhadas entre treino e serving (o treino serializa `model.joblib` e o serving carrega via `joblib.load`): as versões exatas vivem no lock de runtime e a paridade entre treino e serving é verificada automaticamente.
 
-Para atualizar os locks após mudar um `.in`, compile arquivo por arquivo com a mesma versão do Python da CI e da imagem (3.12):
+Para atualizar os locks após mudar um `.in`, compile arquivo por arquivo com a mesma versão do Python da CI e da imagem (3.12). O `click<8.2` é pinado porque o pip-tools 7.5.1 registra flags espúrias no cabeçalho dos locks com click 8.2+:
 
 ```bash
 docker run --rm -v "$PWD/backend:/src" -w /src python:3.12-slim \
-  sh -c "pip install "pip-tools==7.5.1" && pip-compile requirements.in && pip-compile requirements-dev.in && pip-compile requirements-train.in"
+  sh -c 'pip install "pip-tools==7.5.1" "click<8.2" && pip-compile requirements.in && pip-compile requirements-dev.in && pip-compile requirements-train.in'
 ```
 
-Qualidade local (gate da CI = ruff + mypy + pytest + checks de paridade e proteção):
+Qualidade local (gate da CI = ruff + mypy + pytest + checks de paridade e proteção), tudo da raiz do monorepo:
 
 ```bash
-cd backend
 ruff check .
 mypy
 pytest
-cd ..
 python scripts/check_dependency_parity.py
 bash scripts/check_artifact_ignores.sh
 ```
@@ -95,7 +108,7 @@ Convenções de código, regras de contribuição e contexto para agentes de IA 
 
 ```
 predict-flow/
-├── .github/workflows/   # CI (ruff, mypy, pytest + Postgres) e release por milestone
+├── .github/workflows/   # CI (ruff, mypy, smoke de treino, pytest + Postgres) e release por milestone
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/      # rotas (health)
@@ -104,10 +117,12 @@ predict-flow/
 │   │   ├── models/      # (fase ML)
 │   │   ├── schemas/     # (fase ML)
 │   │   └── services/    # (fase ML)
-│   ├── tests/           # pytest
+│   ├── tests/           # pytest do backend
 │   ├── Dockerfile
-│   ├── pyproject.toml   # ruff e mypy
 │   └── requirements*.{in,txt}  # locks pip-tools (runtime, dev, train)
+├── training/            # ingestão, splits, pipeline, métricas, train CLI e seus testes
+├── pyproject.toml       # ruff e mypy (raiz, cobre backend + training)
+├── pytest.ini           # testpaths backend/tests + training/tests
 ├── scripts/             # checks de paridade de dependências e proteção de artefatos
 ├── docs/adr/            # decisões arquiteturais e científicas
 └── docker-compose.yml   # backend + Postgres (demo local)
@@ -129,6 +144,5 @@ Os milestones M1 (fundação) → M6 (extras) são rastreados nas [issues do Git
 Estas etapas entram em milestones futuros e serão documentadas aqui quando existirem:
 
 - **Migrations (Alembic)** — a partir da #7
-- **Treino do pipeline ML** — a partir das issues de ML (M2+)
 - **Verificação de integridade do artefato** — a partir da #8 (usada pelo readiness na #15)
 - **Frontend** — a partir da #12

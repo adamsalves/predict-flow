@@ -6,8 +6,12 @@ target-version = "py312"
 # enforcing the project's honest-typing rule at lint time.
 select = ["E", "F", "I", "UP", "PGH003"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["app", "training"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 disallow_any_explicit = true
-files = ["app", "tests"]
+files = ["backend/app", "backend/tests", "training"]
+mypy_path = ["backend", "."]

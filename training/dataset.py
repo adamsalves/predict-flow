@@ -61,7 +61,8 @@ def sha256_file(path: Path) -> str:
 
 def _default_download(url: str) -> bytes:
     with urlopen(url, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-        return response.read()
+        content: bytes = response.read()
+    return content
 
 
 def _ensure_cached(

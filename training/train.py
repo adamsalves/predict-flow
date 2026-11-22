@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -30,9 +30,14 @@ import numpy as np
 import pandas as pd
 
 from training.dataset import DatasetProvenance, canonical_provenance, load_dataset
-from training.features import FEATURES, FEATURE_SCHEMA_VERSION, ID_COLUMN, TARGET
-from training.features import feature_schema_digest
-from training.metrics import MetricWithCI, N_BOOTSTRAP, SplitMetrics, evaluate_split
+from training.features import (
+    FEATURE_SCHEMA_VERSION,
+    FEATURES,
+    ID_COLUMN,
+    TARGET,
+    feature_schema_digest,
+)
+from training.metrics import N_BOOTSTRAP, MetricWithCI, SplitMetrics, evaluate_split
 from training.preprocessing import build_pipeline
 from training.splits import SplitResult, split_dataset
 
@@ -96,19 +101,20 @@ def _require_columns(df: pd.DataFrame) -> None:
         raise ValueError(f"training data is missing contract columns: {missing}")
 
 
-def _encoded_target(df: pd.DataFrame) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
+FloatArray = np.ndarray[tuple[int], np.dtype[np.float64]]
+
+
+def _encoded_target(df: pd.DataFrame) -> FloatArray:
     encoded = df[TARGET].map({"No": 0.0, "Yes": 1.0})
     if encoded.isna().any():
         raise ValueError(f"{TARGET} must be in {{'Yes', 'No'}}")
-    return encoded.to_numpy(dtype=np.float64)
+    return np.asarray(encoded.to_numpy(dtype=np.float64), dtype=np.float64)
 
 
-def _positive_proba(
-    pipeline: Pipeline, df: pd.DataFrame
-) -> np.ndarray[tuple[int], np.dtype[np.float64]]:
+def _positive_proba(pipeline: Pipeline, df: pd.DataFrame) -> FloatArray:
     feature_names = [spec.name for spec in FEATURES]
     proba = np.asarray(pipeline.predict_proba(df[feature_names]), dtype=np.float64)
-    return proba[:, 1]
+    return np.asarray(proba[:, 1], dtype=np.float64)
 
 
 def _split_block(result: SplitResult) -> dict[str, object]:
@@ -261,7 +267,7 @@ def train(
         model=model,
         seed=seed,
         version=version,
-        trained_at=datetime.now(timezone.utc).isoformat(),
+        trained_at=datetime.now(UTC).isoformat(),
         git_commit=git_commit,
         git_dirty=git_dirty,
         splits=splits,

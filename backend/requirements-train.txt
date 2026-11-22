@@ -52,12 +52,15 @@ narwhals==2.29.0
 numpy==2.5.5
     # via
     #   -r requirements.txt
+    #   pandas
     #   scikit-learn
     #   scipy
 opentelemetry-api==1.45.2
     # via
     #   -r requirements.txt
     #   fastapi
+pandas==3.1.1
+    # via -r requirements-train.in
 psycopg[binary]==3.3.9
     # via -r requirements.txt
 psycopg-binary==3.3.9
@@ -75,6 +78,8 @@ pydantic-core==2.50.5
     #   pydantic
 pydantic-settings==2.16.3
     # via -r requirements.txt
+python-dateutil==4.0.0
+    # via pandas
 python-dotenv==1.2.4
     # via
     #   -r requirements.txt
@@ -121,6 +126,8 @@ typing-inspection==0.4.5
     #   fastapi
     #   pydantic
     #   pydantic-settings
+tzdata==2026.6
+    # via python-dateutil
 uvicorn[standard]==0.54.0
     # via -r requirements.txt
 uvloop==0.23.0

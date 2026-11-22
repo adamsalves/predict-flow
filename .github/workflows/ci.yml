@@ -32,20 +32,20 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements-dev.txt
+            backend/requirements-train.txt
       - name: Instalar dependências
-        working-directory: backend
-        run: pip install -r requirements-dev.txt
+        run: pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
       - name: Ruff
-        working-directory: backend
         run: ruff check .
       - name: mypy
-        working-directory: backend
         run: mypy
       - name: Verificar paridade de dependências treino/serving
         run: python scripts/check_dependency_parity.py
       - name: Verificar proteção de artefatos
         run: bash scripts/check_artifact_ignores.sh
       - name: pytest
-        working-directory: backend
         run: pytest -q
+      - name: Smoke de treino (baseline LR)
+        run: python -m training.train --model lr --version ci-smoke --output-dir /tmp/pf-models

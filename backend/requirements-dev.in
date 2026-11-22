@@ -1,9 +1,12 @@
 # Development environment dependencies (input for pip-compile).
 # Compiles the production runtime lock (requirements.txt) together with the
 # tooling used for local development and CI: tests, lint and type checking.
+# pandas-stubs types the training code under mypy strict; pandas itself is
+# training-only and lives in requirements-train.in.
 -r requirements.txt
 pytest
 httpx
 ruff
 mypy
+pandas-stubs
 pip-tools

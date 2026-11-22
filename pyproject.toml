@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# PGH003 forbids bare `# type: ignore` comments without a specific error code,
+# enforcing the project's honest-typing rule at lint time.
+select = ["E", "F", "I", "UP", "PGH003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "training"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_any_explicit = true
+files = ["backend/app", "backend/tests", "training"]
+mypy_path = ["backend", "."]
+
+# scikit-learn and joblib ship no official type stubs. Their use is confined
+# to training/, where every public function keeps real annotations and
+# narrows library results explicitly; the imported symbols themselves stay
+# Any (same justified deviation pattern as backend/app/core/config.py).
+[[tool.mypy.overrides]]
+module = ["sklearn", "sklearn.*", "joblib"]
+ignore_missing_imports = true

@@ -27,22 +27,26 @@ Testes (CI = ruff + mypy + pytest com Postgres, ver `.github/workflows/ci.yml`):
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements-dev.txt
-cd backend
+pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade.
+Os locks dev e train são instalados juntos: os testes de `training/` exigem `pandas`, dependência exclusiva de treino (ADR-0017). Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade. O teste de download do dataset Telco se auto-pula offline.
 
-Qualidade (também gate da CI):
+Treino do baseline (LR em Pipeline único, manifesto completo — ver README):
 
 ```bash
-cd backend
-ruff check .    # lint (pyproject.toml: E/F/I/UP/PGH003)
-mypy            # typecheck strict, sem Any explícito
+python -m training.train --model lr
+```
+
+Qualidade (também gate da CI), tudo da raiz do monorepo:
+
+```bash
+ruff check .    # lint (pyproject.toml na raiz: E/F/I/UP/PGH003)
+mypy            # typecheck strict, sem Any explícito; cobre backend/ e training/
 pytest
-python scripts/check_dependency_parity.py   # da raiz: paridade treino/serving (ADR-0017)
-bash scripts/check_artifact_ignores.sh      # da raiz: artefatos/datasets fora do git e da imagem
+python scripts/check_dependency_parity.py   # paridade treino/serving (ADR-0017)
+bash scripts/check_artifact_ignores.sh      # artefatos/datasets fora do git e da imagem
 ```
 
 ## Convenções de código

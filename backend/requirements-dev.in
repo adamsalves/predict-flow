@@ -1,0 +1,9 @@
+# Development environment dependencies (input for pip-compile).
+# Compiles the production runtime lock (requirements.txt) together with the
+# tooling used for local development and CI: tests, lint and type checking.
+-r requirements.txt
+pytest
+httpx
+ruff
+mypy
+pip-tools

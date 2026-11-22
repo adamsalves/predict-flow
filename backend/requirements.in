@@ -1,0 +1,13 @@
+# Production runtime dependencies (input for pip-compile).
+# Compiled to requirements.txt, which is what the Docker image installs.
+# scikit-learn and joblib are shared pipeline libraries: training produces
+# model.joblib and serving loads it via joblib.load, so both environments
+# must resolve the exact same versions (parity enforced by
+# scripts/check_dependency_parity.py, see ADR-0017).
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+pydantic-settings
+scikit-learn
+joblib

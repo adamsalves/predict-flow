@@ -23,18 +23,27 @@ curl http://127.0.0.1:8000/api/v1/health/ready  # 200 com Postgres, 503 sem
 docker compose down                   # para e remove containers (volume do Postgres persiste)
 ```
 
-Testes (CI = `pytest` com Postgres, ver `.github/workflows/ci.yml`):
+Testes (CI = ruff + mypy + pytest com Postgres, ver `.github/workflows/ci.yml`):
 
 ```bash
-cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r backend/requirements-dev.txt
+cd backend
 pytest
 ```
 
 Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade.
 
-Lint/build: ainda não configurados — o gate hoje é pytest na CI. Quando entrarem (mypy/ruff no backend, eslint/tsc no frontend), esta seção é atualizada.
+Qualidade (também gate da CI):
+
+```bash
+cd backend
+ruff check .    # lint (pyproject.toml: E/F/I/UP/PGH003)
+mypy            # typecheck strict, sem Any explícito
+pytest
+python scripts/check_dependency_parity.py   # da raiz: paridade treino/serving (ADR-0017)
+bash scripts/check_artifact_ignores.sh      # da raiz: artefatos/datasets fora do git e da imagem
+```
 
 ## Convenções de código
 

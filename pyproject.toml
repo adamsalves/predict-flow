@@ -15,3 +15,11 @@ strict = true
 disallow_any_explicit = true
 files = ["backend/app", "backend/tests", "training"]
 mypy_path = ["backend", "."]
+
+# scikit-learn and joblib ship no official type stubs. Their use is confined
+# to training/, where every public function keeps real annotations and
+# narrows library results explicitly; the imported symbols themselves stay
+# Any (same justified deviation pattern as backend/app/core/config.py).
+[[tool.mypy.overrides]]
+module = ["sklearn", "sklearn.*", "joblib"]
+ignore_missing_imports = true

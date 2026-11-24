@@ -11,3 +11,7 @@ psycopg[binary]
 pydantic-settings
 scikit-learn
 joblib
+# shap generates local explanations at serving time through the fitted
+# Pipeline components (ADR-0001, ADR-0018), so it is a runtime dependency
+# shared with training and covered by the parity check.
+shap

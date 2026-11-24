@@ -7,6 +7,9 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
+# alembic applies the domain schema migrations (issue #7); it ships in the
+# runtime image so `alembic upgrade head` can run at deploy time.
+alembic
 psycopg[binary]
 pydantic-settings
 scikit-learn

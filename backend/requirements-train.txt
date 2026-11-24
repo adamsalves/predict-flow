@@ -4,6 +4,8 @@
 #
 #    pip-compile requirements-train.in
 #
+alembic==1.20.1
+    # via -r requirements.txt
 annotated-doc==0.0.7
     # via
     #   -r requirements.txt
@@ -46,6 +48,14 @@ joblib==1.6.0
     #   -r requirements-train.in
     #   -r requirements.txt
     #   scikit-learn
+mako==1.4.3
+    # via
+    #   -r requirements.txt
+    #   alembic
+markupsafe==3.0.4
+    # via
+    #   -r requirements.txt
+    #   mako
 narwhals==2.29.0
     # via
     #   -r requirements.txt
@@ -117,7 +127,9 @@ slicer==0.0.8
     #   -r requirements.txt
     #   shap
 sqlalchemy==2.1.9
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   alembic
 starlette==1.10.0
     # via
     #   -r requirements.txt
@@ -133,6 +145,7 @@ tqdm==4.70.1
 typing-extensions==4.16.0
     # via
     #   -r requirements.txt
+    #   alembic
     #   anyio
     #   fastapi
     #   opentelemetry-api

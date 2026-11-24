@@ -7,6 +7,9 @@ itself never imports the training package at runtime.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -15,6 +18,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.frozen import FrozenEstimator
 from sklearn.pipeline import Pipeline
 
+import app.schemas.explanation
 from app.schemas.explanation import (
     FACTORS_SCHEMA_VERSION,
     METHOD_LINEAR,
@@ -156,3 +160,42 @@ def test_unsupported_classifier_raises() -> None:
 def test_factors_schema_digest_is_stable() -> None:
     assert factors_schema_digest() == factors_schema_digest()
     assert len(factors_schema_digest()) == 64
+
+
+def test_json_descriptor_matches_pydantic_models() -> None:
+    from app.schemas.explanation import ExplanationFactor, LocalExplanation
+
+    descriptor = json.loads(
+        (Path(app.schemas.explanation.__file__).parent / "factors_schema.json")
+        .read_text(encoding="utf-8")
+    )
+    assert {f["name"] for f in descriptor["factor"]} == set(
+        ExplanationFactor.model_fields
+    )
+    assert {f["name"] for f in descriptor["envelope"]} == set(
+        LocalExplanation.model_fields
+    )
+    assert descriptor["schema_version"] == FACTORS_SCHEMA_VERSION
+
+
+def test_training_mirror_matches_backend_schema_and_adapters() -> None:
+    from training.factors_schema import EXPLANATION_BY_MODEL
+    from training.factors_schema import (
+        factors_schema_digest as training_digest,
+    )
+    from training.factors_schema import (
+        factors_schema_version as training_version,
+    )
+
+    assert training_digest() == factors_schema_digest()
+    assert training_version() == FACTORS_SCHEMA_VERSION
+
+    lr_pipeline, df = _fit("lr")
+    rf_pipeline, _ = _fit("rf", n_estimators=25)
+    raw = _raw_row(df)
+    lr_explanation = explain_local(lr_pipeline, raw, model_version="v")
+    rf_explanation = explain_local(rf_pipeline, raw, model_version="v")
+    assert lr_explanation.method == EXPLANATION_BY_MODEL["lr"]["method"]
+    assert lr_explanation.unit == EXPLANATION_BY_MODEL["lr"]["unit"]
+    assert rf_explanation.method == EXPLANATION_BY_MODEL["rf"]["method"]
+    assert rf_explanation.unit == EXPLANATION_BY_MODEL["rf"]["unit"]

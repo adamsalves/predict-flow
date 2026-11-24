@@ -1,0 +1,19 @@
+{
+  "schema_version": "1",
+  "factor": [
+    {"name": "feature", "type": "str"},
+    {"name": "value", "type": "str | int | float | None"},
+    {"name": "contribution", "type": "float"}
+  ],
+  "envelope": [
+    {"name": "schema_version", "type": "str"},
+    {"name": "method", "type": "str"},
+    {"name": "unit", "type": "str"},
+    {"name": "model_version", "type": "str"},
+    {"name": "base_value", "type": "float"},
+    {"name": "output_value", "type": "float"},
+    {"name": "top_k", "type": "int"},
+    {"name": "factors", "type": "list[ExplanationFactor]"},
+    {"name": "interpretation_note", "type": "str"}
+  ]
+}

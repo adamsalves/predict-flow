@@ -12,10 +12,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-FACTORS_SCHEMA_VERSION = "1"
+# Single source of truth for the factors schema: this JSON ships inside the
+# serving image (backend/) and is read by training from the repo checkout,
+# so both environments record the same version and digest in the manifest.
+_SCHEMA_PATH = Path(__file__).with_name("factors_schema.json")
+_schema_descriptor: dict[str, object] = json.loads(
+    _SCHEMA_PATH.read_text(encoding="utf-8")
+)
+FACTORS_SCHEMA_VERSION = str(_schema_descriptor["schema_version"])
 
 # ADR-0011: explanations are predictive, never causal — declared in the
 # payload itself so no client can present them otherwise.
@@ -70,23 +78,5 @@ class LocalExplanation(BaseModel):  # type: ignore[explicit-any]  # see Explanat
 
 def factors_schema_digest() -> str:
     """SHA-256 of the canonical explanation schema (order-insensitive keys)."""
-    canonical = {
-        "envelope": [
-            {"name": "schema_version", "type": "str"},
-            {"name": "method", "type": "str"},
-            {"name": "unit", "type": "str"},
-            {"name": "model_version", "type": "str"},
-            {"name": "base_value", "type": "float"},
-            {"name": "output_value", "type": "float"},
-            {"name": "top_k", "type": "int"},
-            {"name": "factors", "type": "list[ExplanationFactor]"},
-            {"name": "interpretation_note", "type": "str"},
-        ],
-        "factor": [
-            {"name": "feature", "type": "str"},
-            {"name": "value", "type": "str | int | float | None"},
-            {"name": "contribution", "type": "float"},
-        ],
-    }
-    payload = json.dumps(canonical, separators=(",", ":"), sort_keys=True)
+    payload = json.dumps(_schema_descriptor, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

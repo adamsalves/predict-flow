@@ -19,10 +19,17 @@ from pathlib import Path
 import numpy as np
 
 from training.dataset import DatasetProvenance
+from training.factors_schema import factors_schema_digest
 from training.features import FEATURES, feature_schema_digest
+from training.publication import (
+    MANIFEST_FILENAME,
+    MODEL_FILENAME,
+    REGISTRY_FILENAME,
+    verify_publication,
+)
 from training.splits import split_dataset
 from training.tests.conftest import FrameFactory
-from training.train import MANIFEST_FILENAME, MODEL_FILENAME, train
+from training.train import train
 
 _SEED = 42
 _VERSION = "testrun"
@@ -44,7 +51,6 @@ def _run(make_frame: FrameFactory, output_dir: Path) -> dict[str, object]:
     return train(
         df=df,
         provenance=_provenance(),
-        model="lr",
         seed=_SEED,
         version=_VERSION,
         output_dir=output_dir,
@@ -62,7 +68,7 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
     written = json.loads((version_dir / MANIFEST_FILENAME).read_text())
     assert written == manifest
 
-    # Top-level structure required by ADR-0002 / issue #5.
+    # Top-level structure required by ADR-0002 / issues #5 and #6.
     for key in (
         "schema_version",
         "model_version",
@@ -73,15 +79,18 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
         "target",
         "splits",
         "features",
+        "factors_schema",
         "preprocessing",
+        "selection",
         "model",
+        "explanation",
         "metrics",
         "environment",
         "training",
     ):
         assert key in written, f"manifest missing key: {key}"
 
-    assert written["schema_version"] == "1"
+    assert written["schema_version"] == "2"
     assert written["model_version"] == _VERSION
     assert written["seed"] == _SEED
     assert written["git"]["commit"]
@@ -100,28 +109,57 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
     assert "historical" in limitations
     assert "90 days" in limitations  # no prospective horizon is asserted
 
-    # 45 No -> 27/9/9 and 15 Yes -> 9/3/3.
+    # 45 No -> 27/9/9 and 15 Yes -> 9/3/3; calibration carves 6+2 of train.
     splits = written["splits"]
     assert splits["train"]["n"] == 36
     assert splits["val"]["n"] == 12
     assert splits["test"]["n"] == 12
+    assert splits["calibration"]["n"] == 8
 
     features = written["features"]
     assert features["feature_schema_version"] == "1"
     assert features["feature_schema_sha256"] == feature_schema_digest()
     assert len(features["items"]) == 19
 
-    assert written["preprocessing"]["fitted_on"] == "train only"
-    assert written["model"]["type"] == "LogisticRegression"
-    assert written["model"]["hyperparameters"] == {
-        "C": 1.0,
-        "max_iter": 1000,
-        "solver": "lbfgs",
+    factors = written["factors_schema"]
+    assert factors["schema_version"] == "1"
+    assert factors["sha256"] == factors_schema_digest()
+
+    assert written["preprocessing"]["fitted_on"] == "train fit sub-split only"
+
+    selection = written["selection"]
+    assert selection["winner"] in {
+        "lr-baseline",
+        "rf-deep",
+        "rf-regularized",
     }
-    assert written["model"]["threshold"] is None
-    assert written["model"]["calibration_parameters"] is None
-    assert "issue #11" in written["model"]["decision_policy"]
+    assert selection["gate_rule"]
+    assert selection["limitations"]
+    assert len(selection["candidates"]) == 3
+    assert len(selection["comparisons"]) == 2
+
+    model = written["model"]
+    assert model["candidate"] == selection["winner"]
+    expected_type = (
+        "LogisticRegression"
+        if selection["winner"] == "lr-baseline"
+        else "RandomForestClassifier"
+    )
+    assert model["type"] == expected_type
+    assert model["hyperparameters"]
+    assert 0.0 < model["threshold"]["value"] <= 1.0
+    assert model["threshold"]["rule"] == "f1_max_on_validation"
+    assert model["calibration"]["method"] in ("none", "sigmoid", "isotonic")
+    assert "issue #11" in model["decision_policy"]
     assert "base_rate" not in written["target"]  # lives under metrics only
+
+    explanation = written["explanation"]
+    if selection["winner"] == "lr-baseline":
+        assert explanation["method"] == "linear"
+        assert explanation["unit"] == "log_odds"
+    else:
+        assert explanation["method"] == "tree_shap"
+        assert explanation["unit"] == "probability"
 
     validation = written["metrics"]["validation"]
     test_final = written["metrics"]["test_final"]
@@ -133,11 +171,17 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
         assert len(block["brier_ci95"]) == 2
         assert len(block["calibration"]) >= 1
     assert "not used for model selection" in test_final["note"]
+    assert test_final["at_threshold"]["threshold"] == model["threshold"]["value"]
 
-    for package in ("python", "scikit-learn", "numpy", "pandas", "joblib"):
+    for package in ("python", "scikit-learn", "numpy", "pandas", "joblib", "shap"):
         assert written["environment"][package]
     assert written["training"]["n_boot"] == 1000
     assert "logical determinism" in written["training"]["determinism"]
+
+    # Publication registry: trusted digest source outside the version dir.
+    assert (tmp_path / "models" / REGISTRY_FILENAME).is_file()
+    record = verify_publication(version_dir)
+    assert record.artifact_sha256 == model["artifact_sha256"]
 
 
 def test_split_digests_match_recompute(
@@ -176,7 +220,6 @@ def test_model_joblib_loads_outside_repo_import_path(
     train(
         df=df,
         provenance=_provenance(),
-        model="lr",
         seed=_SEED,
         version=_VERSION,
         output_dir=tmp_path / "models",
@@ -220,7 +263,7 @@ def test_logical_determinism_same_seed(
     )
     for block in (stable_a, stable_b):
         block.pop("trained_at")
-        block["training"].pop("duration_fit_seconds")
+        block["training"].pop("duration_fit_seconds_by_candidate")
         block["training"].pop("duration_total_seconds")
         block["git"] = {"commit": "pinned", "dirty": False}
         # Binary artifact equality is explicitly not part of logical

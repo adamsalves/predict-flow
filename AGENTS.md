@@ -6,7 +6,7 @@ Convenções e contexto deste repositório para humanos e agentes (Kimi Code, Cl
 
 Monorepo de predição de churn / retenção de clientes, com explicabilidade e avaliação disciplinada.
 
-- **Backend**: FastAPI (Python 3.12), pydantic-settings, SQLAlchemy, pytest. Estrutura em `backend/app/`: `api/v1/` (rotas), `core/` (config), `db/` (engine/sessão), `models/`, `schemas/`, `services/` (as três últimas reservadas para a fase ML).
+- **Backend**: FastAPI (Python 3.12), pydantic-settings, SQLAlchemy síncrono (ADR-0012), Alembic, pytest. Estrutura em `backend/app/`: `api/v1/` (rotas), `core/` (config), `db/` (engine/sessão), `models/` (modelos de domínio SQLAlchemy), `schemas/` (DTOs e contratos), `services/` (regras de negócio e fronteiras transacionais).
 - **Frontend**: Angular standalone + PrimeNG (scaffold a partir da #12, milestone M4). Types gerados via OpenAPI codegen (ADR-0007).
 - **Pipeline ML**: seleção LR/RF, explicabilidade (SHAP), champion/challenger — fases M2+.
 - **Ambiente**: demo local single-tenant com Docker Compose (backend + Postgres). Não está pronto para dados reais de clientes (ADR-0010).
@@ -18,6 +18,7 @@ Setup e execução local (Docker):
 
 ```bash
 docker compose up --build -d          # sobe backend + Postgres
+docker compose exec backend alembic upgrade head   # aplica as migrações do schema de domínio
 curl http://127.0.0.1:8000/api/v1/health/live   # 200
 curl http://127.0.0.1:8000/api/v1/health/ready  # 200 com Postgres, 503 sem
 docker compose down                   # para e remove containers (volume do Postgres persiste)

@@ -47,6 +47,24 @@ docker compose down
 
 Credenciais e portas são defaults de desenvolvimento local apenas (`127.0.0.1`), conforme ADR-0010. Para sobrescrevê-las, use variáveis de ambiente (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`) ou um `backend/.env` (ignorado pelo git).
 
+## Banco de dados (migrações)
+
+O schema de domínio (clientes, serviços e predições — ADR-0005/0006/0015) é versionado com Alembic em `backend/alembic/`. Com o ambiente do Quickstart de pé, aplique as migrações dentro do container:
+
+```bash
+docker compose exec backend alembic upgrade head
+```
+
+Localmente (venv ativa, Postgres acessível em `DATABASE_URL`):
+
+```bash
+cd backend
+alembic upgrade head     # aplica as migrações pendentes
+alembic downgrade base   # desfaz tudo (comportamento definido e testado)
+```
+
+A URL de conexão vem sempre da configuração da aplicação (`DATABASE_URL`) — nunca é fixada no `alembic.ini`. A suíte de testes cria bancos temporários no Postgres real, aplica a migração neles e valida constraints, índices e concorrência contra o banco (sem mocks do ORM); sem Postgres, esses testes se auto-pulam.
+
 ## Testes
 
 Com Python 3.12+:

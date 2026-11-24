@@ -13,6 +13,7 @@ of pandas (the serving environment has neither).
 from __future__ import annotations
 
 import numbers
+import warnings
 from collections.abc import Mapping
 
 import numpy as np
@@ -80,7 +81,15 @@ def _transform_row(preprocessor: ColumnTransformer, raw: RawFeatures) -> FloatAr
                 # SeniorCitizen), so coercing to str would miss categories.
                 row.append(value)
         x = np.asarray([row], dtype=np.float64 if kind == "numeric" else object)
-        transformed = branch.transform(x)
+        with warnings.catch_warnings():
+            # Intentional: the fitted branches accept nameless arrays; the
+            # column order comes from the fitted transformer itself.
+            warnings.filterwarnings(
+                "ignore",
+                message="X does not have valid feature names",
+                category=UserWarning,
+            )
+            transformed = branch.transform(x)
         dense = (
             transformed.toarray() if hasattr(transformed, "toarray") else transformed
         )

@@ -162,6 +162,20 @@ def test_factors_schema_digest_is_stable() -> None:
     assert len(factors_schema_digest()) == 64
 
 
+def test_explanation_emits_no_feature_name_warnings() -> None:
+    import warnings
+
+    pipeline, df = _fit("lr")
+    raw = _raw_row(df)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        explain_local(pipeline, raw, model_version="v")
+    feature_name_warnings = [
+        w for w in caught if "valid feature names" in str(w.message)
+    ]
+    assert feature_name_warnings == []
+
+
 def test_json_descriptor_matches_pydantic_models() -> None:
     from app.schemas.explanation import ExplanationFactor, LocalExplanation
 

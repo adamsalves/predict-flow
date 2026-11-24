@@ -1,10 +1,11 @@
 # Training environment dependencies (input for pip-compile).
 # Reuses the production runtime lock so the training environment resolves the
-# exact same versions of the shared pipeline libraries (scikit-learn, joblib)
-# as serving; parity is verified automatically by
-# scripts/check_dependency_parity.py (see ADR-0017). pandas is training-only:
-# dtype coercion is ingestion/contract enforcement and never runs inside the
-# serialized sklearn Pipeline, keeping the serving environment free of it.
+# exact same versions of the shared pipeline libraries (scikit-learn, joblib,
+# shap) as serving; parity is verified automatically by
+# scripts/check_dependency_parity.py (see ADR-0017). pandas is pinned here
+# explicitly for training (dtype coercion is ingestion/contract enforcement
+# and never runs inside the serialized sklearn Pipeline); the runtime lock
+# also resolves it transitively via shap, which serving uses for explanations.
 -r requirements.txt
 scikit-learn
 joblib

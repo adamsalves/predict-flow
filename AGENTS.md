@@ -31,12 +31,12 @@ pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Os locks dev e train são instalados juntos: os testes de `training/` exigem `pandas`, dependência exclusiva de treino (ADR-0017). Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade. O teste de download do dataset Telco se auto-pula offline.
+Os locks dev e train são instalados juntos: os testes de `training/` exigem `pandas` — no runtime ele chega transitivamente via `shap` (explicações no serving), mas o pin explícito vive no lock de treino (ADR-0017). Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade. O teste de download do dataset Telco se auto-pula offline.
 
-Treino do baseline (LR em Pipeline único, manifesto completo — ver README):
+Treino com seleção LR/RF (Pipeline único, gate na validação, manifesto completo — ver README):
 
 ```bash
-python -m training.train --model lr
+python -m training.train
 ```
 
 Qualidade (também gate da CI), tudo da raiz do monorepo:

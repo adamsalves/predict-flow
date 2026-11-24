@@ -47,5 +47,5 @@ jobs:
         run: bash scripts/check_artifact_ignores.sh
       - name: pytest
         run: pytest -q
-      - name: Smoke de treino (baseline LR)
-        run: python -m training.train --model lr --version ci-smoke --output-dir /tmp/pf-models
+      - name: Smoke de treino (seleção LR/RF + gate)
+        run: python -m training.train --version ci-smoke --output-dir /tmp/pf-models

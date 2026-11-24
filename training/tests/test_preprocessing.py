@@ -76,7 +76,33 @@ def test_unknown_category_does_not_break_transform(
 
 def test_pipeline_rejects_unknown_model() -> None:
     with pytest.raises(ValueError, match="unsupported model"):
-        build_pipeline("rf")
+        build_pipeline("xgboost")
+
+
+def test_rf_uses_same_preprocessor_and_predicts(make_frame: FrameFactory) -> None:
+    df = make_frame(30, 10)
+    lr_pipeline = build_pipeline("lr")
+    rf_pipeline = build_pipeline("rf", {"n_estimators": 10}, seed=7)
+    features = df[[spec.name for spec in FEATURES]]
+    lr_pipeline.fit(features, _y(df))
+    rf_pipeline.fit(features, _y(df))
+
+    assert [name for name, _ in rf_pipeline.steps] == ["preprocessor", "classifier"]
+    lr_pre = lr_pipeline.named_steps["preprocessor"]
+    rf_pre = rf_pipeline.named_steps["preprocessor"]
+    lr_structure = [(name, cols) for name, _, cols in lr_pre.transformers]
+    rf_structure = [(name, cols) for name, _, cols in rf_pre.transformers]
+    assert lr_structure == rf_structure
+    proba = rf_pipeline.predict_proba(features.head(4))
+    assert proba.shape == (4, 2)
+
+
+def test_hyperparameters_override_defaults(make_frame: FrameFactory) -> None:
+    pipeline = build_pipeline("rf", {"n_estimators": 10, "max_depth": 3}, seed=7)
+    classifier = pipeline.named_steps["classifier"]
+    assert classifier.n_estimators == 10
+    assert classifier.max_depth == 3
+    assert classifier.random_state == 7
 
 
 def test_pipeline_structure_is_single_sklearn_pipeline(

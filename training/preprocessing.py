@@ -12,7 +12,10 @@ Pipeline, at dataset ingestion (see ``training/dataset.py``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -46,16 +49,9 @@ PIPELINE_CATEGORICAL_FEATURES: tuple[str, ...] = (
 )
 
 
-def build_pipeline(model: str = "lr") -> Pipeline:
-    """Build the single sklearn Pipeline for the chosen model.
-
-    Only ``lr`` exists today (the mandatory baseline, ADR-0004); issue #6
-    adds ``rf`` as a challenger behind the same preprocessing.
-    """
-    if model != "lr":
-        raise ValueError(f"unsupported model {model!r}; choices: 'lr'")
-
-    preprocessor = ColumnTransformer(
+def build_preprocessor() -> ColumnTransformer:
+    """Build the shared preprocessing block used by every candidate."""
+    return ColumnTransformer(
         transformers=[
             (
                 "numeric",
@@ -79,5 +75,33 @@ def build_pipeline(model: str = "lr") -> Pipeline:
             ),
         ]
     )
-    classifier = LogisticRegression(C=1.0, max_iter=1000, solver="lbfgs")
-    return Pipeline(steps=[("preprocessor", preprocessor), ("classifier", classifier)])
+
+
+def build_pipeline(
+    model: str = "lr",
+    hyperparameters: Mapping[str, object] | None = None,
+    *,
+    seed: int = 42,
+) -> Pipeline:
+    """Build the single sklearn Pipeline for the chosen model.
+
+    ``lr`` is the mandatory baseline and ``rf`` the challenger (ADR-0004);
+    both share the exact same preprocessing block so the validation gate
+    compares classifiers, not feature pipelines. ``random_state`` is always
+    derived from ``seed`` for the forest; explicit hyperparameters override
+    the defaults.
+    """
+    params = dict(hyperparameters or {})
+    if model == "lr":
+        classifier = LogisticRegression(
+            **{"C": 1.0, "max_iter": 1000, "solver": "lbfgs", **params}
+        )
+    elif model == "rf":
+        classifier = RandomForestClassifier(
+            **{"n_estimators": 200, "random_state": seed, **params}
+        )
+    else:
+        raise ValueError(f"unsupported model {model!r}; choices: 'lr', 'rf'")
+    return Pipeline(
+        steps=[("preprocessor", build_preprocessor()), ("classifier", classifier)]
+    )

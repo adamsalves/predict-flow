@@ -216,6 +216,63 @@ def test_prospective_negative_accepted_after_maturity(db_session: Session) -> No
     db_session.flush()
 
 
+def test_corrected_negative_uses_correction_moment(db_session: Session) -> None:
+    # Regression (review of issue #7): a positive recorded before maturity
+    # and corrected to false after the window closed is legitimate — the
+    # maturity clock is the correction moment, not the first record.
+    customer = _customer(db_session, "C-CM")
+    db_session.add(
+        _prediction(
+            customer.id,
+            outcome_window_start=WINDOW_START,
+            outcome_window_end=WINDOW_END,
+            **_outcome_bundle(
+                actual_churn=False,
+                outcome_recorded_at=datetime(2026, 2, 1, tzinfo=UTC),
+                outcome_updated_at=datetime(2026, 3, 5, tzinfo=UTC),
+            ),
+        )
+    )
+    db_session.flush()
+
+
+def test_corrected_negative_before_maturity_rejected(db_session: Session) -> None:
+    customer = _customer(db_session, "C-CX")
+    db_session.add(
+        _prediction(
+            customer.id,
+            outcome_window_start=WINDOW_START,
+            outcome_window_end=WINDOW_END,
+            **_outcome_bundle(
+                actual_churn=False,
+                outcome_recorded_at=datetime(2026, 2, 1, tzinfo=UTC),
+                outcome_updated_at=datetime(2026, 2, 15, tzinfo=UTC),
+            ),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_outcome_origin_must_match_data_origin(db_session: Session) -> None:
+    customer = _customer(db_session, "C-OM")
+    db_session.add(
+        _prediction(
+            customer.id,
+            **_outcome_bundle(outcome_origin=DataOrigin.HISTORICAL_TEST),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_feature_schema_version_normalized(db_session: Session) -> None:
+    customer = _customer(db_session, "C-FV")
+    db_session.add(_prediction(customer.id, feature_schema_version=" "))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_historical_negative_needs_no_window(db_session: Session) -> None:
     # Telco labels stay segregated in historical_test and are never promoted
     # to mature prospective outcomes (ADR-0005/ADR-0006).

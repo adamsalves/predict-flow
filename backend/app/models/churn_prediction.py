@@ -18,6 +18,12 @@ promoted to mature prospective outcomes.
 FK behavior: ``customer_id`` is ``ON DELETE RESTRICT`` — prediction history
 blocks identity deletion. ``batch_id`` stays a plain UUID until the batch
 table lands with issue #18.
+
+Deliberate leniencies: ``risk_band`` is the provisional binary band tied to
+the provisional threshold (the final decision policy is issue #11,
+ADR-0011), and the outcome window is only checked for internal coherence —
+demo/backfill timelines are simulated, so no CHECK ties the window to
+``score_at``.
 """
 
 from __future__ import annotations
@@ -70,6 +76,11 @@ class ChurnPrediction(Base):
             name="feature_snapshot_size",
         ),
         sa.CheckConstraint(
+            "feature_schema_version <> ''"
+            " AND feature_schema_version = btrim(feature_schema_version)",
+            name="feature_schema_version_normalized",
+        ),
+        sa.CheckConstraint(
             f"feature_schema_digest ~ '{_DIGEST_HEX_PATTERN}'",
             name="feature_schema_digest_hex",
         ),
@@ -114,12 +125,21 @@ class ChurnPrediction(Base):
             name="censored_without_outcome",
         ),
         # ADR-0005: a prospective "did not churn" is only accepted after the
-        # outcome window has fully matured at record time.
+        # outcome window has fully matured. Maturity is measured at the
+        # moment the negative is asserted: the first record, or the latest
+        # correction when the outcome was later changed to false.
         sa.CheckConstraint(
             "NOT (data_origin = 'prospective' AND actual_churn IS FALSE)"
-            " OR (outcome_window_end IS NOT NULL AND outcome_recorded_at IS NOT NULL"
-            " AND outcome_recorded_at >= outcome_window_end)",
+            " OR (outcome_window_end IS NOT NULL"
+            " AND COALESCE(outcome_updated_at, outcome_recorded_at)"
+            " >= outcome_window_end)",
             name="prospective_negative_maturity",
+        ),
+        # The outcome inherits the prediction's origin scope (ADR-0006):
+        # a demo prediction never gains a prospective outcome.
+        sa.CheckConstraint(
+            "outcome_origin IS NULL OR outcome_origin = data_origin",
+            name="outcome_origin_matches_data_origin",
         ),
         # Anonymous sandbox predictions never join the current projection.
         sa.CheckConstraint(

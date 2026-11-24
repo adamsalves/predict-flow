@@ -98,12 +98,24 @@ def record_outcome(
     The first record sets ``outcome_recorded_at``; corrections keep it and
     set ``outcome_updated_at``, preserving the administrative timeline
     (ADR-0005/ADR-0006). A stale ``expected_version`` raises
-    ``ConcurrencyConflictError`` without touching the stored outcome.
-    Database checks still apply — e.g. a prospective "did not churn" before
-    window maturity is rejected by the maturity constraint.
+    ``ConcurrencyConflictError`` without touching the stored outcome — note
+    the conflict path rolls the session back, discarding any pending work
+    the caller had in the same transaction. Database checks still apply —
+    e.g. a prospective "did not churn" before window maturity is rejected
+    by the maturity constraint. A correction that omits ``observed_at``
+    keeps the previously recorded event moment instead of erasing it
+    (ADR-0014: corrections never silently rewrite the past).
     """
     now = datetime.now(UTC)
     already_recorded = ChurnPrediction.outcome_recorded_at.is_not(None)
+    if observed_at is None:
+        # A correction that omits the event moment keeps the stored one.
+        observed_value: object = case(
+            (already_recorded, ChurnPrediction.outcome_observed_at),
+            else_=None,
+        )
+    else:
+        observed_value = observed_at
     statement = (
         update(ChurnPrediction)
         .where(
@@ -114,7 +126,7 @@ def record_outcome(
             actual_churn=actual_churn,
             outcome_origin=origin,
             outcome_recorded_by=recorded_by,
-            outcome_observed_at=observed_at,
+            outcome_observed_at=observed_value,
             outcome_recorded_at=case(
                 (already_recorded, ChurnPrediction.outcome_recorded_at),
                 else_=now,

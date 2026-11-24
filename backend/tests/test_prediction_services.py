@@ -164,6 +164,46 @@ def test_record_outcome_historical_negative_allowed(db_session: Session) -> None
     assert recorded.outcome_origin == DataOrigin.HISTORICAL_TEST
 
 
+def test_record_outcome_correction_keeps_observed_at_when_omitted(
+    db_session: Session,
+) -> None:
+    customer = register_customer(db_session, "C-OBS")
+    prediction = _record(db_session, customer.id)
+    observed = datetime(2026, 2, 1, tzinfo=UTC)
+    record_outcome(
+        db_session,
+        prediction.id,
+        expected_version=0,
+        actual_churn=True,
+        origin=DataOrigin.PROSPECTIVE,
+        recorded_by="analyst-a",
+        observed_at=observed,
+    )
+    corrected = record_outcome(
+        db_session,
+        prediction.id,
+        expected_version=1,
+        actual_churn=True,
+        origin=DataOrigin.PROSPECTIVE,
+        recorded_by="analyst-b",
+    )
+    # Omitting the event moment on a correction never erases it (ADR-0014).
+    assert corrected.outcome_observed_at == observed
+    assert corrected.outcome_recorded_by == "analyst-b"
+
+
+def test_record_without_activation_keeps_previous_current(
+    db_session: Session,
+) -> None:
+    customer = register_customer(db_session, "C-NOACT")
+    first = _record(db_session, customer.id)
+    second = _record(db_session, customer.id, activate=False)
+    db_session.expire_all()
+    # Batch hook (ADR-0015): an inactive record never moves the projection.
+    assert first.is_current is True
+    assert second.is_current is False
+
+
 def test_concurrent_outcome_correction_detected(migrated_db_url: str) -> None:
     """Two real sessions, real commits: the stale writer loses (ADR-0014)."""
     engine = create_engine(migrated_db_url)

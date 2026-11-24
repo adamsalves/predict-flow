@@ -8,7 +8,11 @@ import pandas as pd
 import pytest
 
 from training.features import ID_COLUMN, TARGET
-from training.splits import split_dataset, split_ids_digest
+from training.splits import (
+    split_dataset,
+    split_ids_digest,
+    split_train_for_calibration,
+)
 from training.tests.conftest import FrameFactory
 
 
@@ -92,3 +96,32 @@ def test_target_column_survives_splitting(make_frame: FrameFactory) -> None:
     result = split_dataset(df, seed=42)
     assert TARGET in result.train.columns
     assert result.train[TARGET].isin(["Yes", "No"]).all()
+
+
+def test_calibration_sub_split_is_disjoint_and_covers_train(
+    make_frame: FrameFactory,
+) -> None:
+    df = make_frame(600, 150)
+    train = split_dataset(df, seed=42).train
+    result = split_train_for_calibration(train, seed=42)
+
+    fit_ids = _ids(result.fit)
+    cal_ids = _ids(result.calibration)
+    assert fit_ids.isdisjoint(cal_ids)
+    assert fit_ids | cal_ids == _ids(train)
+
+
+def test_calibration_sub_split_is_deterministic_and_stratified(
+    make_frame: FrameFactory,
+) -> None:
+    df = make_frame(600, 150)
+    train = split_dataset(df, seed=42).train
+    first = split_train_for_calibration(train, seed=42)
+    second = split_train_for_calibration(train, seed=42)
+    assert first.fit_meta.ids_sha256 == second.fit_meta.ids_sha256
+    assert first.calibration_meta.ids_sha256 == second.calibration_meta.ids_sha256
+    # Train has 360 No + 90 Yes: int(360*0.25)=90 and int(90*0.25)=22.
+    assert len(first.calibration) == 90 + 22
+    assert first.calibration_meta.churn_rate == pytest.approx(22 / 112)
+    other = split_train_for_calibration(train, seed=7)
+    assert other.calibration_meta.ids_sha256 != first.calibration_meta.ids_sha256

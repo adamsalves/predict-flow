@@ -7,6 +7,10 @@ by this trusted source before ``joblib.load``. A joint artifact+manifest
 substitution is rejected because the registry digest no longer matches,
 and a published version is immutable: republishing the same version with
 different content is an error, while an identical republish is a no-op.
+
+Concurrency note: publication is read-modify-write without locking — safe
+for the single-process local demo (ADR-0010); batch workers (#12/#16) must
+revisit this before publishing concurrently.
 """
 
 from __future__ import annotations
@@ -22,6 +26,13 @@ MODEL_FILENAME = "model.joblib"
 MANIFEST_FILENAME = "model_meta.json"
 REGISTRY_FILENAME = "publication_registry.json"
 REGISTRY_SCHEMA_VERSION = "1"
+_RECORD_FIELDS = (
+    "model_version",
+    "artifact_sha256",
+    "manifest_sha256",
+    "published_at",
+    "git_commit",
+)
 
 
 class PublicationError(Exception):
@@ -54,6 +65,13 @@ def _load_registry(registry_path: Path) -> dict[str, object]:
         )
     if not isinstance(data.get("publications"), list):
         raise PublicationError("registry has no publications list")
+    publications = data["publications"]
+    assert isinstance(publications, list)
+    for record in publications:
+        if not isinstance(record, dict) or any(
+            not isinstance(record.get(field), str) for field in _RECORD_FIELDS
+        ):
+            raise PublicationError(f"malformed registry record: {record!r}")
     return data
 
 

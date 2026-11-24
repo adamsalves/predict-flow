@@ -1,5 +1,6 @@
 {
   "schema_version": "1",
+  "top_k_default": 10,
   "factor": [
     {"name": "feature", "type": "str"},
     {"name": "value", "type": "str | int | float | None"},

@@ -57,7 +57,7 @@ pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Os locks de dev e treino são instalados juntos: os testes de `training/` exigem `pandas`, que é dependência exclusiva de treino (ADR-0017).
+Os locks de dev e treino são instalados juntos: os testes de `training/` exigem `pandas`, que o lock de treino pinna explicitamente (no runtime ele chega transitivamente via `shap`, usado nas explicações do serving — ADR-0017).
 
 Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade. O teste de download do dataset Telco também se auto-pula offline.
 

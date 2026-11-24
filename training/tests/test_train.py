@@ -20,7 +20,7 @@ import numpy as np
 
 from training.dataset import DatasetProvenance
 from training.factors_schema import factors_schema_digest
-from training.features import FEATURES, feature_schema_digest
+from training.features import FEATURES, ID_COLUMN, feature_schema_digest
 from training.publication import (
     MANIFEST_FILENAME,
     MODEL_FILENAME,
@@ -47,7 +47,7 @@ def _provenance() -> DatasetProvenance:
 
 
 def _run(make_frame: FrameFactory, output_dir: Path) -> dict[str, object]:
-    df = make_frame(45, 15)
+    df = make_frame(120, 60)
     return train(
         df=df,
         provenance=_provenance(),
@@ -109,12 +109,12 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
     assert "historical" in limitations
     assert "90 days" in limitations  # no prospective horizon is asserted
 
-    # 45 No -> 27/9/9 and 15 Yes -> 9/3/3; calibration carves 6+2 of train.
+    # 120 No -> 72/24/24 and 60 Yes -> 36/12/12; calibration carves 18+9.
     splits = written["splits"]
-    assert splits["train"]["n"] == 36
-    assert splits["val"]["n"] == 12
-    assert splits["test"]["n"] == 12
-    assert splits["calibration"]["n"] == 8
+    assert splits["train"]["n"] == 108
+    assert splits["val"]["n"] == 36
+    assert splits["test"]["n"] == 36
+    assert splits["calibration"]["n"] == 27
 
     features = written["features"]
     assert features["feature_schema_version"] == "1"
@@ -184,6 +184,55 @@ def test_end_to_end_writes_artifacts_and_full_manifest(
     assert record.artifact_sha256 == model["artifact_sha256"]
 
 
+def test_selection_is_isolated_from_the_test_split(
+    make_frame: FrameFactory, tmp_path: Path
+) -> None:
+    """Corrupting the test split must not change any selection decision:
+    winner, calibration and threshold come from train/validation only
+    (ADR-0009). The corruption permutes feature values inside the test
+    rows only — labels stay intact so the stratified split assignment is
+    unchanged — and the test evaluation itself must move, proving the
+    corruption landed where intended."""
+    df = make_frame(120, 60)
+    train(
+        df=df,
+        provenance=_provenance(),
+        seed=_SEED,
+        version="clean",
+        output_dir=tmp_path / "a",
+    )
+
+    test_ids = set(split_dataset(df, seed=_SEED).test[ID_COLUMN])
+    corrupted = df.copy()
+    mask = corrupted[ID_COLUMN].isin(test_ids)
+    rng = np.random.default_rng(0)
+    for spec in FEATURES:
+        corrupted.loc[mask, spec.name] = rng.permutation(
+            corrupted.loc[mask, spec.name].to_numpy()
+        )
+
+    train(
+        df=corrupted,
+        provenance=_provenance(),
+        seed=_SEED,
+        version="dirty",
+        output_dir=tmp_path / "b",
+    )
+
+    clean = json.loads(
+        (tmp_path / "a" / "clean" / MANIFEST_FILENAME).read_text()
+    )
+    dirty = json.loads(
+        (tmp_path / "b" / "dirty" / MANIFEST_FILENAME).read_text()
+    )
+    assert clean["selection"] == dirty["selection"]
+    assert clean["model"]["threshold"] == dirty["model"]["threshold"]
+    assert clean["model"]["calibration"] == dirty["model"]["calibration"]
+    clean_auc = clean["metrics"]["test_final"]["roc_auc"]
+    dirty_auc = dirty["metrics"]["test_final"]["roc_auc"]
+    assert clean_auc != dirty_auc
+
+
 def test_split_digests_match_recompute(
     make_frame: FrameFactory, tmp_path: Path
 ) -> None:
@@ -191,7 +240,7 @@ def test_split_digests_match_recompute(
     written = json.loads(
         (tmp_path / "models" / _VERSION / MANIFEST_FILENAME).read_text()
     )
-    df = make_frame(45, 15)
+    df = make_frame(120, 60)
     expected = split_dataset(df, seed=_SEED)
     assert written["splits"]["train"]["ids_sha256"] == expected.train_meta.ids_sha256
     assert written["splits"]["val"]["ids_sha256"] == expected.val_meta.ids_sha256
@@ -216,7 +265,7 @@ def test_model_joblib_loads_outside_repo_import_path(
     """The artifact must load and predict without the ``training`` package
     on sys.path (ADR-0001/ADR-0017): the pickle references only
     sklearn/numpy classes, never training code or lambdas."""
-    df = make_frame(45, 15)
+    df = make_frame(120, 60)
     train(
         df=df,
         provenance=_provenance(),

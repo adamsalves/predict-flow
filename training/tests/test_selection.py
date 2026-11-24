@@ -89,6 +89,13 @@ def test_missing_baseline_raises() -> None:
         decide((_candidate("rf-deep", (0.72, 0.69, 0.75)),))
 
 
+def test_duplicate_candidate_names_raise() -> None:
+    first = _candidate("rf-deep", (0.72, 0.69, 0.75))
+    second = _candidate("rf-deep", (0.60, 0.56, 0.63))
+    with pytest.raises(ValueError, match="unique"):
+        decide((_BASELINE, first, second))
+
+
 def test_decision_serializes_gate_evidence() -> None:
     challenger = _candidate("rf-deep", (0.72, 0.69, 0.75))
     decision = decide((_BASELINE, challenger))

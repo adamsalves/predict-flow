@@ -94,3 +94,21 @@ def test_verify_unknown_version_fails(tmp_path: Path) -> None:
     other = _make_version(tmp_path, "v2", b"other")
     with pytest.raises(PublicationError, match="not present"):
         verify_publication(other)
+
+
+def test_malformed_registry_record_raises_publication_error(
+    tmp_path: Path,
+) -> None:
+    version_dir = _make_version(tmp_path, "v1", b"model-bytes")
+    registry_path = tmp_path / REGISTRY_FILENAME
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "publications": [{"model_version": "v1"}],  # missing fields
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(PublicationError, match="malformed registry record"):
+        verify_publication(version_dir, registry_path)

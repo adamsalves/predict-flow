@@ -7,7 +7,8 @@ back onto contract features. LogisticRegression gets exact linear
 contributions (``coef * value``) in log-odds; RandomForest gets TreeSHAP
 values in probability units. Everything is derived by introspecting the
 fitted artifact, so this module stays free of training-side constants and
-of pandas (the serving environment has neither).
+never imports pandas (serving resolves pandas transitively via shap, but
+the explanation path does not depend on it).
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from app.schemas.explanation import (
     METHOD_LINEAR,
     METHOD_TREE_SHAP,
     PREDICTIVE_NOT_CAUSAL_NOTE,
+    TOP_K_DEFAULT,
     UNIT_LOG_ODDS,
     UNIT_PROBABILITY,
     ExplanationFactor,
@@ -38,7 +40,6 @@ from app.schemas.explanation import (
 
 FloatArray = NDArray[np.float64]
 RawFeatures = Mapping[str, object]
-DEFAULT_TOP_K = 10
 
 
 def _unwrap_pipeline(scorer: object) -> Pipeline:
@@ -161,7 +162,7 @@ def explain_local(
     raw: RawFeatures,
     *,
     model_version: str,
-    top_k: int = DEFAULT_TOP_K,
+    top_k: int = TOP_K_DEFAULT,
 ) -> LocalExplanation:
     """Explain one score with the adapter matching the active classifier.
 

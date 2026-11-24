@@ -29,7 +29,11 @@ from app.schemas.explanation import (
 )
 from app.services.explain import explain_local
 from training.features import FEATURES, TARGET
-from training.preprocessing import build_pipeline
+from training.preprocessing import (
+    PIPELINE_CATEGORICAL_FEATURES,
+    PIPELINE_NUMERIC_FEATURES,
+    build_pipeline,
+)
 from training.tests.conftest import synthetic_frame
 
 _FEATURE_NAMES = [spec.name for spec in FEATURES]
@@ -96,9 +100,64 @@ def test_both_models_produce_the_same_contract_fields() -> None:
     lr_explanation = explain_local(lr_pipeline, raw, model_version="v")
     rf_explanation = explain_local(rf_pipeline, raw, model_version="v")
     assert set(lr_explanation.model_dump()) == set(rf_explanation.model_dump())
-    assert {f.feature for f in lr_explanation.factors} == {
+
+
+def test_grouped_contributions_match_exact_computation() -> None:
+    """The one-hot grouping must attribute each encoded column to the right
+    contract feature: with top_k covering all features, every contract
+    feature appears exactly once, and the grouped contribution equals the
+    direct computation on the fitted components."""
+    pipeline, df = _fit("lr")
+    raw = _raw_row(df)
+    explanation = explain_local(pipeline, raw, model_version="v", top_k=25)
+    assert {f.feature for f in explanation.factors} == {
         spec.name for spec in FEATURES
-    } & {f.feature for f in lr_explanation.factors}
+    }
+    assert len(explanation.factors) == len(FEATURES)
+
+    classifier = pipeline.named_steps["classifier"]
+    preprocessor = pipeline.named_steps["preprocessor"]
+    coef = np.asarray(classifier.coef_[0], dtype=np.float64)
+
+    # Numeric feature: contribution == coef * transformed value.
+    numeric_branch = preprocessor.named_transformers_["numeric"]
+    x_num = np.asarray(
+        numeric_branch.transform(df[list(PIPELINE_NUMERIC_FEATURES)].head(1)),
+        dtype=np.float64,
+    )[0]
+    tenure_idx = list(PIPELINE_NUMERIC_FEATURES).index("tenure")
+    expected_tenure = float(coef[tenure_idx] * x_num[tenure_idx])
+    actual_tenure = next(
+        f.contribution for f in explanation.factors if f.feature == "tenure"
+    )
+    assert actual_tenure == pytest.approx(expected_tenure, abs=1e-10)
+
+    # Categorical feature: contribution == sum over its dummy block. The
+    # branch output holds only categorical columns, so blocks are relative
+    # to the categorical block while coef indices include the numeric one.
+    cat_branch = preprocessor.named_transformers_["categorical"]
+    encoder = cat_branch.named_steps["encoder"]
+    x_cat = np.asarray(
+        cat_branch.transform(df[list(PIPELINE_CATEGORICAL_FEATURES)].head(1)).toarray(),
+        dtype=np.float64,
+    )[0]
+    relative = 0
+    blocks: dict[str, tuple[int, int, int]] = {}
+    for col, categories in zip(
+        PIPELINE_CATEGORICAL_FEATURES, encoder.categories_, strict=True
+    ):
+        absolute = len(PIPELINE_NUMERIC_FEATURES) + relative
+        blocks[col] = (absolute, absolute + len(categories), relative)
+        relative += len(categories)
+    abs_start, abs_end, rel_start = blocks["Contract"]
+    rel_end = rel_start + (abs_end - abs_start)
+    expected_contract = float(
+        (coef[abs_start:abs_end] * x_cat[rel_start:rel_end]).sum()
+    )
+    actual_contract = next(
+        f.contribution for f in explanation.factors if f.feature == "Contract"
+    )
+    assert actual_contract == pytest.approx(expected_contract, abs=1e-10)
 
 
 def test_top_k_limits_factors_with_deterministic_order() -> None:
@@ -193,6 +252,7 @@ def test_json_descriptor_matches_pydantic_models() -> None:
 
 
 def test_training_mirror_matches_backend_schema_and_adapters() -> None:
+    from app.schemas.explanation import TOP_K_DEFAULT
     from training.factors_schema import EXPLANATION_BY_MODEL
     from training.factors_schema import (
         factors_schema_digest as training_digest,
@@ -200,9 +260,13 @@ def test_training_mirror_matches_backend_schema_and_adapters() -> None:
     from training.factors_schema import (
         factors_schema_version as training_version,
     )
+    from training.factors_schema import (
+        top_k_default as training_top_k,
+    )
 
     assert training_digest() == factors_schema_digest()
     assert training_version() == FACTORS_SCHEMA_VERSION
+    assert training_top_k() == TOP_K_DEFAULT
 
     lr_pipeline, df = _fit("lr")
     rf_pipeline, _ = _fit("rf", n_estimators=25)

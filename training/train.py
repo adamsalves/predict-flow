@@ -54,6 +54,7 @@ from training.factors_schema import (
     EXPLANATION_BY_MODEL,
     factors_schema_digest,
     factors_schema_version,
+    top_k_default,
 )
 from training.features import (
     FEATURE_SCHEMA_VERSION,
@@ -62,7 +63,13 @@ from training.features import (
     TARGET,
     feature_schema_digest,
 )
-from training.metrics import N_BOOTSTRAP, MetricWithCI, SplitMetrics, evaluate_split
+from training.metrics import (
+    N_BOOTSTRAP,
+    FloatArray,
+    MetricWithCI,
+    SplitMetrics,
+    evaluate_split,
+)
 from training.preprocessing import build_pipeline
 from training.publication import (
     MANIFEST_FILENAME,
@@ -78,9 +85,9 @@ from training.splits import (
 )
 
 MANIFEST_SCHEMA_VERSION = "2"
-DEFAULT_TOP_K = 10
-# Distinct bootstrap streams: validation uses seed+1+index per candidate,
-# the single final test evaluation uses a fixed far offset.
+# Bootstrap streams: validation uses seed+1 for every candidate (paired
+# resamples across models); the single final test evaluation uses a fixed
+# far offset.
 _TEST_METRICS_SEED_OFFSET = 101
 
 MODEL_TYPE_NAMES = {"lr": "LogisticRegression", "rf": "RandomForestClassifier"}
@@ -113,8 +120,6 @@ DETERMINISM_NOTE = (
     "digests; binary equality of the artifact across environments is not "
     "guaranteed"
 )
-
-FloatArray = np.ndarray[tuple[int], np.dtype[np.float64]]
 
 
 def _git_info() -> tuple[str, bool | None]:
@@ -278,7 +283,7 @@ def _build_manifest(
             "adapter": "app.services.explain:explain_local",
             "method": EXPLANATION_BY_MODEL[winner.model]["method"],
             "unit": EXPLANATION_BY_MODEL[winner.model]["unit"],
-            "top_k_default": DEFAULT_TOP_K,
+            "top_k_default": top_k_default(),
             "note": EXPLANATION_NOTE,
         },
         "metrics": {
@@ -343,8 +348,8 @@ def train(
     val_probs_by_candidate: dict[str, FloatArray] = {}
     duration_fit_by_candidate: dict[str, float] = {}
 
-    for index, candidate in enumerate(candidate_specs):
-        pipeline = build_pipeline_for(candidate, seed)
+    for candidate in candidate_specs:
+        pipeline = build_pipeline(candidate.model, candidate.hyperparameters, seed=seed)
         fit_started = time.perf_counter()
         pipeline.fit(calibration_split.fit[feature_names], y_fit)
         duration_fit_by_candidate[candidate.name] = (
@@ -360,9 +365,9 @@ def train(
         }
         choice = select_calibration(val_probs, y_val)
         scorer = calibrators[choice.method]
-        val_metrics = evaluate_split(
-            y_val, val_probs[choice.method], seed=seed + 1 + index
-        )
+        # Paired bootstrap: the same resample stream (seed+1) for every
+        # candidate, so the gate compares models on identical resamples.
+        val_metrics = evaluate_split(y_val, val_probs[choice.method], seed=seed + 1)
 
         evaluations.append(
             CandidateEvaluation(
@@ -438,10 +443,6 @@ def train(
         registry_digest=record.artifact_sha256,
     )
     return manifest
-
-
-def build_pipeline_for(candidate: CandidateSpec, seed: int) -> FittedScorer:
-    return build_pipeline(candidate.model, candidate.hyperparameters, seed=seed)
 
 
 def _print_summary(

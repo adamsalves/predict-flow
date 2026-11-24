@@ -41,6 +41,10 @@ def factors_schema_version() -> str:
     return str(_descriptor()["schema_version"])
 
 
+def top_k_default() -> int:
+    return int(str(_descriptor()["top_k_default"]))
+
+
 def factors_schema_digest() -> str:
     payload = json.dumps(_descriptor(), separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -115,6 +115,9 @@ def decide(
     baseline_name: str = BASELINE_NAME,
 ) -> GateDecision:
     """Apply the gate to the validation evaluations and pick the winner."""
+    names = [e.name for e in evaluations]
+    if len(names) != len(set(names)):
+        raise ValueError("candidate names must be unique")
     by_name = {e.name: e for e in evaluations}
     if baseline_name not in by_name:
         raise ValueError(f"baseline candidate {baseline_name!r} is required")

@@ -36,6 +36,13 @@ from training.metrics import FloatArray
 type FittedScorer = Pipeline | CalibratedClassifierCV
 
 CALIBRATION_METHODS = ("none", "sigmoid", "isotonic")
+# Cross-fitting folds of the calibrator over the calibration sub-split.
+# sklearn 1.9 note: with a FrozenEstimator there is no "prefit" branch —
+# CalibratedClassifierCV still runs cross_val_predict, but the base
+# estimator's fit is a no-op, so the calibrator only ever sees x_cal (no
+# leakage; verified against sklearn source). The benign side effect is a
+# StratifiedKFold UserWarning when a class has fewer members than folds.
+CALIBRATION_CV_FOLDS = 5
 # Tie-break preference: simpler calibration wins an exact Brier tie.
 _COMPLEXITY_ORDER = {"none": 0, "sigmoid": 1, "isotonic": 2}
 
@@ -55,12 +62,14 @@ class CalibrationChoice:
     method: str
     val_brier_by_method: dict[str, float]
     fitted_on: str = CALIBRATION_FITTED_ON
+    cv_folds: int = CALIBRATION_CV_FOLDS
 
     def to_dict(self) -> dict[str, object]:
         return {
             "method": self.method,
             "val_brier_by_method": self.val_brier_by_method,
             "fitted_on": self.fitted_on,
+            "cv_folds": self.cv_folds,
         }
 
 
@@ -110,7 +119,7 @@ def fit_candidate_calibrators(
     fitted: dict[str, FittedScorer] = {"none": pipeline}
     for method in CALIBRATION_METHODS[1:]:
         fitted[method] = CalibratedClassifierCV(
-            FrozenEstimator(pipeline), method=method
+            FrozenEstimator(pipeline), method=method, cv=CALIBRATION_CV_FOLDS
         ).fit(x_cal, y_cal)
     return fitted
 

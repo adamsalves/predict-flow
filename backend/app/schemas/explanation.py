@@ -24,6 +24,7 @@ _schema_descriptor: dict[str, object] = json.loads(
     _SCHEMA_PATH.read_text(encoding="utf-8")
 )
 FACTORS_SCHEMA_VERSION = str(_schema_descriptor["schema_version"])
+TOP_K_DEFAULT = int(str(_schema_descriptor["top_k_default"]))
 
 # ADR-0011: explanations are predictive, never causal — declared in the
 # payload itself so no client can present them otherwise.

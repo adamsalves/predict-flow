@@ -35,7 +35,7 @@ _CATEGORICAL_VALUES: dict[str, tuple[str, ...]] = {
 }
 
 
-def _synthetic_frame(n_no: int, n_yes: int) -> pd.DataFrame:
+def synthetic_frame(n_no: int, n_yes: int) -> pd.DataFrame:
     """Build a contract-shaped frame: ``n_no`` + ``n_yes`` unique customers."""
     n = n_no + n_yes
     data: dict[str, object] = {
@@ -60,4 +60,4 @@ def _synthetic_frame(n_no: int, n_yes: int) -> pd.DataFrame:
 
 @pytest.fixture
 def make_frame() -> FrameFactory:
-    return _synthetic_frame
+    return synthetic_frame

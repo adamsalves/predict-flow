@@ -61,15 +61,17 @@ Os locks de dev e treino são instalados juntos: os testes de `training/` exigem
 
 Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade. O teste de download do dataset Telco também se auto-pula offline.
 
-## Treino do modelo (baseline)
+## Treino do modelo (seleção LR/RF)
 
-O baseline obrigatório (ADR-0004) é uma LogisticRegression em um Pipeline sklearn único, com splits estratificados por target e disjuntos por cliente, avaliação final separada no teste e manifesto completo (ADR-0002, ADR-0009, ADR-0013, ADR-0017):
+O treino executa a seleção disciplinada de modelo (ADR-0004): a LogisticRegression baseline e os desafiantes RandomForest são treinados no mesmo Pipeline sklearn único, com splits estratificados por target e disjuntos por cliente, e comparados somente na validação — PR-AUC como métrica primária com incerteza bootstrap, calibração (Brier) como critério complementar. Em empate prático ou derrota, o baseline é mantido. A calibração é ajustada num sub-split de calibração extraído do treino e o método escolhido na validação; o threshold operacional (provisório, F1-máx na validação) também vem da validação; o teste é avaliado uma única vez, após o congelamento (ADR-0009). O manifesto completo registra comparativo, decisão e limitações (ADR-0002, ADR-0013, ADR-0017, ADR-0018):
 
 ```bash
-python -m training.train --model lr
+python -m training.train
 ```
 
-Os artefatos vão para `models/<version>/` (gitignored, ADR-0017): `model.joblib` + `model_meta.json`, com seed, commit, SHA-256 do dataset, licença, digests dos splits, versão e digest do contrato de features, métricas com incerteza e orçamento de treino.
+Os artefatos vão para `models/<version>/` (gitignored, ADR-0017): `model.joblib` + `model_meta.json`, com seed, commit, SHA-256 do dataset, licença, digests dos splits, versão e digest dos contratos de features e de fatores, comparativo do gate, calibração, threshold, métricas com incerteza e orçamento de treino. Ao final, os digests da versão são publicados em `models/publication_registry.json` — a fonte confiável separada do diretório do artefato (ADR-0017): a ativação (issue #8) exigirá o digest aprovado por esse registro, e a substituição conjunta de artefato+manifesto é rejeitada.
+
+As explicações locais seguem o DTO estável da ADR-0018 (`backend/app/services/explain.py`): contribuições lineares em log-odds para a LR e TreeSHAP em probabilidade para a RF, sempre top-k determinístico, reutilizando os componentes do Pipeline — preditivas, nunca causais (ADR-0011).
 
 **Dataset**: IBM Telco Customer Churn — 7.043 clientes, um registro histórico por cliente, distribuído no repositório [`IBM/telco-customer-churn-on-icp4d`](https://github.com/IBM/telco-customer-churn-on-icp4d) sob Apache License 2.0. O SHA-256 do arquivo é fixado em `training/dataset.py` e verificado em toda execução.
 
@@ -83,7 +85,7 @@ Os ambientes são reprodutíveis a partir de locks compilados com pip-tools (ADR
 - `requirements-dev.txt` — runtime + testes, ruff, mypy e pip-tools;
 - `requirements-train.txt` — runtime + dependências de treino.
 
-scikit-learn e joblib são bibliotecas compartilhadas entre treino e serving (o treino serializa `model.joblib` e o serving carrega via `joblib.load`): as versões exatas vivem no lock de runtime e a paridade entre treino e serving é verificada automaticamente.
+scikit-learn, joblib e shap são bibliotecas compartilhadas entre treino e serving (o treino serializa `model.joblib` e o serving carrega via `joblib.load` e gera explicações com SHAP): as versões exatas vivem no lock de runtime e a paridade entre treino e serving é verificada automaticamente.
 
 Para atualizar os locks após mudar um `.in`, compile arquivo por arquivo com a mesma versão do Python da CI e da imagem (3.12). O `click<8.2` é pinado porque o pip-tools 7.5.1 registra flags espúrias no cabeçalho dos locks com click 8.2+:
 

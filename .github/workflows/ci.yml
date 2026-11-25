@@ -49,3 +49,8 @@ jobs:
         run: pytest -q
       - name: Smoke de treino (seleção LR/RF + gate)
         run: python -m training.train --version ci-smoke --output-dir /tmp/pf-models
+      - name: Smoke da API com o artefato real (carregar → predizer)
+        env:
+          PF_SMOKE_MODELS_DIR: /tmp/pf-models
+          PF_SMOKE_MODEL_VERSION: ci-smoke
+        run: pytest -q backend/tests/test_model_loader_smoke.py

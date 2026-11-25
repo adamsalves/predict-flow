@@ -14,6 +14,11 @@ psycopg[binary]
 pydantic-settings
 scikit-learn
 joblib
+# pandas builds the one-row frame scored through the fitted Pipeline
+# (app/services/model_loader.py); it already ships in the image as a shap
+# dependency — declaring it makes the direct import explicit. The pin must
+# stay identical to the training lock (parity enforced).
+pandas
 # shap generates local explanations at serving time through the fitted
 # Pipeline components (ADR-0001, ADR-0018), so it is a runtime dependency
 # shared with training and covered by the parity check.

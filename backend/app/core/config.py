@@ -11,6 +11,12 @@ class Settings(BaseSettings):  # type: ignore[explicit-any]
 
     DATABASE_URL: str = "postgresql+psycopg://predict:predict@localhost:5432/predict_flow"
     MODEL_PATH: str = "/models"
+    # Active model version (ADR-0003): activation and rollback are config
+    # changes plus a process restart, never runtime hot-swaps.
+    MODEL_VERSION: str = "v1"
+    # Trusted digest source (ADR-0017); defaults to the publication
+    # registry at the root of the models volume.
+    MODEL_REGISTRY_PATH: str | None = None
     CORS_ORIGINS: list[str] = ["http://localhost:4200"]
 
 

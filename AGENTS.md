@@ -14,15 +14,20 @@ Monorepo de predição de churn / retenção de clientes, com explicabilidade e 
 
 ## Comandos padrão
 
-Setup e execução local (Docker):
+Setup e execução local (Docker). O backend **aborta o startup sem um modelo publicado e verificado** (ADR-0003/0017) — treine e faça o staging antes do primeiro `up`:
 
 ```bash
-docker compose up --build -d          # sobe backend + Postgres
+python -m training.train              # treina e publica models/<version> + registry (venv com os locks)
+mkdir -p ml-artifacts && cp -r models/v1 ml-artifacts/ && cp models/publication_registry.json ml-artifacts/
+docker compose up --build -d          # sobe backend + Postgres (volume ./ml-artifacts:/models:ro)
 docker compose exec backend alembic upgrade head   # aplica as migrações do schema de domínio
 curl http://127.0.0.1:8000/api/v1/health/live   # 200
 curl http://127.0.0.1:8000/api/v1/health/ready  # 200 com Postgres, 503 sem
+curl http://127.0.0.1:8000/api/v1/model/info    # versão, digests, contrato e métricas do modelo ativo
 docker compose down                   # para e remove containers (volume do Postgres persiste)
 ```
+
+Ativação/rollback do modelo: `MODEL_VERSION=<versão>` + restart do backend (somente entre versões compatíveis com o contrato de features — ver README, "Modelo ativo").
 
 Testes (CI = ruff + mypy + pytest com Postgres, ver `.github/workflows/ci.yml`):
 
@@ -32,7 +37,7 @@ pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Os locks dev e train são instalados juntos: os testes de `training/` exigem `pandas` — no runtime ele chega transitivamente via `shap` (explicações no serving), mas o pin explícito vive no lock de treino (ADR-0017). Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade. O teste de download do dataset Telco se auto-pula offline.
+Os locks dev e train são instalados juntos: os testes de `training/` exigem `pandas` — que também é dependência explícita do runtime (o serving monta o frame do `predict_proba`), com o mesmo pin nos dois locks (ADR-0017). Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com `docker compose up -d db` de pé, ele executa de verdade. O teste de download do dataset Telco se auto-pula offline, assim como o smoke de serving com artefato real (`backend/tests/test_model_loader_smoke.py`), que a CI roda após o smoke de treino via `PF_SMOKE_MODELS_DIR`/`PF_SMOKE_MODEL_VERSION`.
 
 Treino com seleção LR/RF (Pipeline único, gate na validação, manifesto completo — ver README):
 

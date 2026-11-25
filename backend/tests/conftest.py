@@ -6,8 +6,14 @@ under test is the one the Alembic migration produces. Each database is
 created fresh and dropped afterwards, so the developer database is never
 touched. Without a reachable Postgres every fixture skips, like the health
 check test.
+
+Issue #8 adds ``published_models_dir``: two real training runs on synthetic
+data whose digests land in the trusted publication registry, so the model
+loader tests exercise the actual cross-package contract — training
+publishes, serving verifies.
 """
 
+import shutil
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,13 +30,92 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import database_available
 from app.main import app
+from app.services.model_loader import REGISTRY_FILENAME
+from training.dataset import DatasetProvenance
+from training.tests.conftest import synthetic_frame
+from training.train import train
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+SAMPLE_INPUT: dict[str, object] = {
+    "gender": "Female",
+    "SeniorCitizen": 0,
+    "Partner": "Yes",
+    "Dependents": "No",
+    "tenure": 12,
+    "PhoneService": "Yes",
+    "MultipleLines": "No",
+    "InternetService": "Fiber optic",
+    "OnlineSecurity": "No",
+    "OnlineBackup": "Yes",
+    "DeviceProtection": "No",
+    "TechSupport": "No",
+    "StreamingTV": "Yes",
+    "StreamingMovies": "No",
+    "Contract": "Month-to-month",
+    "PaperlessBilling": "Yes",
+    "PaymentMethod": "Electronic check",
+    "MonthlyCharges": 89.5,
+    "TotalCharges": 1074.0,
+}
 
 
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture(scope="session")
+def published_models_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Two published model versions (v1, v2) trained on synthetic data.
+
+    ``training.train`` writes artifacts, manifests and the trusted
+    publication registry exactly as in production, so loader tests verify
+    the real registry written by the training package.
+    """
+    output_dir = tmp_path_factory.mktemp("models")
+    df = synthetic_frame(120, 60)
+    provenance = DatasetProvenance(
+        name="synthetic mini dataset",
+        source_url="local://synthetic",
+        license="synthetic, no license",
+        sha256="0" * 64,
+        n_rows=len(df),
+        unit="one synthetic record per customer",
+    )
+    for version, seed in (("v1", 42), ("v2", 43)):
+        train(
+            df=df,
+            provenance=provenance,
+            seed=seed,
+            version=version,
+            output_dir=output_dir,
+        )
+    return output_dir
+
+
+@pytest.fixture
+def sample_input() -> dict[str, object]:
+    return dict(SAMPLE_INPUT)
+
+
+def stage_versions(
+    published: Path,
+    dest: Path,
+    versions: tuple[str, ...],
+    *,
+    with_registry: bool = True,
+) -> Path:
+    """Copy published version directories (and the trusted registry) to dest.
+
+    Tampering tests mutate the copies, never the session-scoped originals.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    for version in versions:
+        shutil.copytree(published / version, dest / version)
+    if with_registry:
+        shutil.copy(published / REGISTRY_FILENAME, dest / REGISTRY_FILENAME)
+    return dest
 
 
 def _alembic_config(url: str) -> AlembicConfig:

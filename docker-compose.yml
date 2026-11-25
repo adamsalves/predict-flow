@@ -22,9 +22,15 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-predict}:${POSTGRES_PASSWORD:-predict}@db:5432/${POSTGRES_DB:-predict_flow}
       MODEL_PATH: /models
+      MODEL_VERSION: ${MODEL_VERSION:-v1}
       CORS_ORIGINS: '["http://localhost:4200"]'
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      # Modelos somente leitura (ADR-0003/ADR-0017): o staging em
+      # ./ml-artifacts é o processo explícito que publica versões para o
+      # serving; o backend nunca escreve no volume.
+      - ./ml-artifacts:/models:ro
     depends_on:
       db:
         condition: service_healthy

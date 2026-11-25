@@ -20,6 +20,7 @@ As decisões arquiteturais e científicas estão registradas em [`docs/adr/`](do
 ## Pré-requisitos
 
 - Docker com Docker Compose (v2)
+- Python 3.12+ (para treinar o modelo antes do primeiro boot)
 - `curl` (para os health checks do quickstart)
 
 ## Quickstart
@@ -27,17 +28,37 @@ As decisões arquiteturais e científicas estão registradas em [`docs/adr/`](do
 ```bash
 git clone https://github.com/adamsalves/predict-flow.git
 cd predict-flow
+```
+
+O backend **só sobe com um modelo publicado e verificado** (ADR-0003/ADR-0017): treine uma vez e faça o staging explícito dos artefatos para o volume de serving:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
+python -m training.train   # treina e publica models/v1 + publication_registry.json
+
+mkdir -p ml-artifacts
+cp -r models/v1 ml-artifacts/
+cp models/publication_registry.json ml-artifacts/
+```
+
+Suba o ambiente:
+
+```bash
 docker compose up --build -d
 ```
 
-Aguarde o backend ficar pronto (o primeiro boot leva alguns segundos) e verifique os health checks:
+Aguarde o backend ficar pronto (o primeiro boot leva alguns segundos) e verifique os health checks e o modelo ativo:
 
 ```bash
 until curl -sf http://127.0.0.1:8000/api/v1/health/live; do sleep 2; done  # interrompa com Ctrl+C se passar de ~1 min
 
 curl http://127.0.0.1:8000/api/v1/health/live    # sempre 200
 curl http://127.0.0.1:8000/api/v1/health/ready   # 200 com Postgres, 503 sem
+curl http://127.0.0.1:8000/api/v1/model/info     # versão, digests, contrato e métricas do modelo ativo
 ```
+
+Se o artefato, o manifesto ou o registro confiável estiverem ausentes ou adulterados, o backend **aborta o startup** com erro claro em vez de servir sem modelo verificado (`docker compose logs backend` mostra o motivo).
 
 Para parar e remover os containers (o volume de dados do Postgres persiste):
 
@@ -75,7 +96,7 @@ pip install -r backend/requirements-dev.txt -r backend/requirements-train.txt
 pytest
 ```
 
-Os locks de dev e treino são instalados juntos: os testes de `training/` exigem `pandas`, que o lock de treino pinna explicitamente (no runtime ele chega transitivamente via `shap`, usado nas explicações do serving — ADR-0017).
+Os locks de dev e treino são instalados juntos: os testes de `training/` exigem `pandas`, que ambos os locks pinnam explicitamente (no runtime ele também é dependência direta — o serving monta o frame de entrada do `predict_proba` — e chega ao resolver pela mesma versão, com paridade verificada — ADR-0017).
 
 Sem Postgres disponível, o teste de health contra DB real é pulado automaticamente; com Postgres de pé (ex.: `docker compose up -d db`), ele executa de verdade. O teste de download do dataset Telco também se auto-pula offline.
 
@@ -87,7 +108,31 @@ O treino executa a seleção disciplinada de modelo (ADR-0004): a LogisticRegres
 python -m training.train
 ```
 
-Os artefatos vão para `models/<version>/` (gitignored, ADR-0017): `model.joblib` + `model_meta.json`, com seed, commit, SHA-256 do dataset, licença, digests dos splits, versão e digest dos contratos de features e de fatores, comparativo do gate, calibração, threshold, métricas com incerteza e orçamento de treino. Ao final, os digests da versão são publicados em `models/publication_registry.json` — a fonte confiável separada do diretório do artefato (ADR-0017): a ativação (issue #8) exigirá o digest aprovado por esse registro, e a substituição conjunta de artefato+manifesto é rejeitada.
+Os artefatos vão para `models/<version>/` (gitignored, ADR-0017): `model.joblib` + `model_meta.json`, com seed, commit, SHA-256 do dataset, licença, digests dos splits, versão e digest dos contratos de features e de fatores, comparativo do gate, calibração, threshold, métricas com incerteza e orçamento de treino. Ao final, os digests da versão são publicados em `models/publication_registry.json` — a fonte confiável separada do diretório do artefato (ADR-0017): a ativação exige o digest aprovado por esse registro, e a substituição conjunta de artefato+manifesto é rejeitada.
+
+## Modelo ativo: ativação, verificação e rollback
+
+O serving consome artefatos por um volume **somente leitura** (`./ml-artifacts:/models:ro`). O staging — copiar a versão e o registro confiável de `models/` para `ml-artifacts/` — é o processo explícito e auditável que publica uma versão para o serving (ADR-0003); o backend nunca escreve no volume.
+
+No startup, o `ModelLoader` (`backend/app/services/model_loader.py`) executa os gates **nesta ordem**, todos antes do `joblib.load`:
+
+1. presença do diretório da versão, do artefato e do manifesto;
+2. procedência: SHA-256 do artefato e do manifesto conferidos contra o registro confiável (`publication_registry.json`, fora do diretório da versão) — substituição conjunta artefato+manifesto é rejeitada aqui;
+3. estrutura do manifesto (versão de schema suportada, identidade da versão);
+4. contratos: versão/digest/lista de features (ADR-0013), digest do schema de fatores (ADR-0018) e encoding do target (`No=0`, `Yes=1`) idênticos aos compilados na API;
+5. ambiente: scikit-learn exatamente igual ao do treino e numpy/pandas no mesmo major (a paridade dos locks já é garantida em build — estes gates são a armadilha de runtime para artefatos treinados fora);
+6. consistência: o digest de artefato declarado no manifesto confere com o registro confiável;
+7. somente então `joblib.load`, e o objeto carregado precisa ser um scorer probabilístico com `classes_ == [0, 1]` — a classe positiva (churn) na posição de probabilidade que o serving lê.
+
+A versão ativa é configuração (`MODEL_VERSION`, default `v1`), com digest confiável opcionalmente apontado por `MODEL_REGISTRY_PATH` (default: o registro na raiz do volume). `GET /api/v1/model/info` expõe versão, digests, contrato, threshold/calibração, métricas históricas e a limitação do target — sem caminhos locais nem dados sensíveis.
+
+**Rollback** (ADR-0003): aponte `MODEL_VERSION` para a versão anterior e reinicie o backend:
+
+```bash
+MODEL_VERSION=v1 docker compose up -d --force-recreate backend
+```
+
+O rollback só é válido entre versões compatíveis com o contrato de features servido pela API — uma versão incompatível falha os gates e o startup aborta, como qualquer ativação inválida. API e futuros workers de batch usam exatamente a mesma validação (`load_active_model`).
 
 As explicações locais seguem o DTO estável da ADR-0018 (`backend/app/services/explain.py`): contribuições lineares em log-odds para a LR e TreeSHAP em probabilidade para a RF, sempre top-k determinístico, reutilizando os componentes do Pipeline — preditivas, nunca causais (ADR-0011).
 

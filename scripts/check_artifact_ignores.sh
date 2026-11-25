@@ -18,6 +18,8 @@ cd "$REPO_ROOT"
 # Representative artifact/dataset paths that must stay out of version control.
 GITIGNORED_PATHS=(
   "models/v1/model.joblib"
+  "ml-artifacts/v1/model.joblib"
+  "ml-artifacts/publication_registry.json"
   "backend/models/v1/model.joblib"
   "backend/models/v1/model_meta.json"
   "data/raw/train.csv"

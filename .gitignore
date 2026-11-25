@@ -7,6 +7,7 @@ __pycache__/
 
 # ML artifacts and datasets (ADR-0017)
 /models/
+/ml-artifacts/
 /backend/models/
 /data/
 /datasets/

@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.api.errors import register_error_handlers
 from app.api.middleware import RequestContextMiddleware
 from app.core.config import get_settings
-from app.db.session import database_available
+from app.db.session import database_available, to_psycopg_dsn
 from app.main import app
 from app.services.model_loader import REGISTRY_FILENAME
 from training.dataset import DatasetProvenance
@@ -142,9 +142,7 @@ def _alembic_config(url: str) -> AlembicConfig:
 
 def _admin_dsn() -> str:
     url = make_url(get_settings().DATABASE_URL).set(database="postgres")
-    return url.render_as_string(hide_password=False).replace(
-        "postgresql+psycopg://", "postgresql://"
-    )
+    return to_psycopg_dsn(url.render_as_string(hide_password=False))
 
 
 def _create_database() -> tuple[str, str]:

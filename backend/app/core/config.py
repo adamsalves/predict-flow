@@ -10,6 +10,10 @@ class Settings(BaseSettings):  # type: ignore[explicit-any]
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     DATABASE_URL: str = "postgresql+psycopg://predict:predict@localhost:5432/predict_flow"
+    # Bounded database readiness probe (issue #40): connect and statement
+    # timeouts derive from this budget, so a slow database cannot hang
+    # /health/ready.
+    DB_READINESS_TIMEOUT_SECONDS: float = 2.0
     MODEL_PATH: str = "/models"
     # Active model version (ADR-0003): activation and rollback are config
     # changes plus a process restart, never runtime hot-swaps.

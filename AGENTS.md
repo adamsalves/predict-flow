@@ -71,6 +71,7 @@ bash scripts/check_artifact_ignores.sh      # artefatos/datasets fora do git e d
 ### Backend (Python)
 
 - Rotas em `app/api/v1/`, uma por domínio, prefixo comum `/api/v1`; regras de negócio em `services/`, nunca na rota.
+- Convenções transversais (issue #40) são consumidas, nunca reimplementadas: erros saem no envelope comum via handlers globais (`app/api/errors.py` — services levantam `DomainError` e subclasses, nunca `HTTPException`); routers declaram `COMMON_ERROR_RESPONSES`; listagens usam `page_params` + `paginate`; `request_id` e log de acesso JSON são automáticos (middleware).
 - Config via pydantic-settings (`app/core/config.py`), nunca hardcoded; credenciais de demo local não são segredos (ADR-0010).
 - Um teste pytest para cada comportamento novo; bugfix vem com teste de regressão que falha antes da correção.
 - Código, comentários e docstrings em inglês (ver "Idioma").

@@ -39,6 +39,15 @@ from training.tests.conftest import synthetic_frame
 ManifestMutator = Callable[[dict[str, object]], None]
 
 
+class _StringClassesScorer:
+    """Pickle-able scorer whose classes are not the served [0.0, 1.0]."""
+
+    classes_ = ["No", "Yes"]
+
+    def predict_proba(self, X: pd.DataFrame) -> object:
+        return np.array([[0.5, 0.5]])
+
+
 def _registry_records(models_dir: Path) -> dict[str, dict[str, str]]:
     data = json.loads((models_dir / REGISTRY_FILENAME).read_text(encoding="utf-8"))
     return {r["model_version"]: r for r in data["publications"]}
@@ -427,6 +436,30 @@ def test_reversed_classes_artifact_rejected(
     pipeline = build_pipeline("lr", {}, seed=42)
     pipeline.fit(df[[spec.name for spec in FEATURES]], y)
     joblib.dump(pipeline, version_dir / MODEL_FILENAME)
+    artifact_sha256 = hashlib.sha256(
+        (version_dir / MODEL_FILENAME).read_bytes()
+    ).hexdigest()
+
+    def _align_claim(manifest: dict[str, object]) -> None:
+        _section(manifest, "model")["artifact_sha256"] = artifact_sha256
+
+    _edit_manifest(version_dir, _align_claim)
+    registry = tmp_path / "trusted_registry.json"
+    _republish(version_dir, registry)
+    with pytest.raises(CompatibilityError, match="artifact classes"):
+        load_active_model(
+            model_path=models, model_version="v1", registry_path=registry
+        )
+
+
+def test_exotic_classes_artifact_rejected_with_compatibility_error(
+    published_models_dir: Path, tmp_path: Path
+) -> None:
+    """String classes must surface as CompatibilityError (activation-failure
+    taxonomy), never as a raw ValueError/TypeError from the gate."""
+    models = stage_versions(published_models_dir, tmp_path / "models", ("v1",))
+    version_dir = models / "v1"
+    joblib.dump(_StringClassesScorer(), version_dir / MODEL_FILENAME)
     artifact_sha256 = hashlib.sha256(
         (version_dir / MODEL_FILENAME).read_bytes()
     ).hexdigest()

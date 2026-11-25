@@ -387,7 +387,13 @@ def load_active_model(
             f"artifact is not a probabilistic scorer: {type(scorer).__name__}"
         )
     classes = getattr(scorer, "classes_", None)
-    if classes is None or [float(c) for c in classes] != SERVED_CLASSES:
+    normalized: list[float] | None = None
+    if classes is not None:
+        try:
+            normalized = [float(c) for c in classes]
+        except (TypeError, ValueError):
+            normalized = None
+    if normalized != SERVED_CLASSES:
         raise CompatibilityError(
             f"artifact classes {classes!r} do not match the served target "
             f"encoding {SERVED_TARGET_ENCODING}: the positive class must sit "

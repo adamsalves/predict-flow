@@ -119,9 +119,10 @@ No startup, o `ModelLoader` (`backend/app/services/model_loader.py`) executa os 
 1. presença do diretório da versão, do artefato e do manifesto;
 2. procedência: SHA-256 do artefato e do manifesto conferidos contra o registro confiável (`publication_registry.json`, fora do diretório da versão) — substituição conjunta artefato+manifesto é rejeitada aqui;
 3. estrutura do manifesto (versão de schema suportada, identidade da versão);
-4. contratos: versão/digest/lista de features (ADR-0013) e digest do schema de fatores (ADR-0018) idênticos aos compilados na API;
-5. ambiente: scikit-learn exatamente igual ao do treino e numpy no mesmo major (a paridade dos locks já é garantida em build — estes gates são a armadilha de runtime para artefatos treinados fora);
-6. somente então `joblib.load`, e o objeto carregado precisa ser um scorer probabilístico.
+4. contratos: versão/digest/lista de features (ADR-0013), digest do schema de fatores (ADR-0018) e encoding do target (`No=0`, `Yes=1`) idênticos aos compilados na API;
+5. ambiente: scikit-learn exatamente igual ao do treino e numpy/pandas no mesmo major (a paridade dos locks já é garantida em build — estes gates são a armadilha de runtime para artefatos treinados fora);
+6. consistência: o digest de artefato declarado no manifesto confere com o registro confiável;
+7. somente então `joblib.load`, e o objeto carregado precisa ser um scorer probabilístico com `classes_ == [0, 1]` — a classe positiva (churn) na posição de probabilidade que o serving lê.
 
 A versão ativa é configuração (`MODEL_VERSION`, default `v1`), com digest confiável opcionalmente apontado por `MODEL_REGISTRY_PATH` (default: o registro na raiz do volume). `GET /api/v1/model/info` expõe versão, digests, contrato, threshold/calibração, métricas históricas e a limitação do target — sem caminhos locais nem dados sensíveis.
 

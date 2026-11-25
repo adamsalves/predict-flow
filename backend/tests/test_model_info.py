@@ -8,6 +8,7 @@ configuration change plus a process restart — modeled here by a fresh
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -52,19 +53,33 @@ def test_model_info_returns_active_version(
     assert resp.status_code == 200
     body = resp.json()
     record = _registry_records(published_models_dir)["v1"]
+    manifest = json.loads(
+        (published_models_dir / "v1" / "model_meta.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert body["model_version"] == "v1"
     assert body["artifact_sha256"] == record["artifact_sha256"]
     assert body["manifest_sha256"] == record["manifest_sha256"]
     assert body["trusted_source"] == REGISTRY_FILENAME
-    assert body["published_at"]
-    assert body["git_commit"]
-    assert body["dataset_name"] == "synthetic mini dataset"
+    assert body["published_at"] == record["published_at"]
+    assert body["git_commit"] == record["git_commit"]
+    assert body["dataset_name"] == manifest["dataset"]["name"]
     assert "historical" in body["target_limitations"].lower()
     assert len(body["features"]) == 19
-    assert body["feature_schema_version"] == "1"
-    assert 0.0 < body["threshold_value"] < 1.0
-    assert body["calibration_method"] in {"none", "sigmoid", "isotonic"}
-    assert body["explanation_method"] == "linear"
+    assert body["feature_schema_version"] == manifest["features"][
+        "feature_schema_version"
+    ]
+    # Operating point and explanation come straight from the loaded
+    # artifact's manifest — never hardcoded to a selection outcome.
+    assert body["model_type"] == manifest["model"]["type"]
+    assert body["threshold_value"] == manifest["model"]["threshold"]["value"]
+    assert body["threshold_rule"] == manifest["model"]["threshold"]["rule"]
+    assert (
+        body["calibration_method"] == manifest["model"]["calibration"]["method"]
+    )
+    assert body["explanation_method"] == manifest["explanation"]["method"]
+    assert body["explanation_unit"] == manifest["explanation"]["unit"]
     assert 0.0 <= body["validation"]["roc_auc"]["value"] <= 1.0
     assert 0.0 <= body["test_final"]["pr_auc"]["value"] <= 1.0
     # The response must not leak the local filesystem layout.
@@ -128,6 +143,30 @@ def test_activation_and_rollback_via_config_and_restart(
         body = client.get("/api/v1/model/info").json()
         assert body["model_version"] == "v1"
         assert body["artifact_sha256"] == records["v1"]["artifact_sha256"]
+
+
+def test_model_registry_path_env_wiring(
+    model_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    published_models_dir: Path,
+    tmp_path: Path,
+) -> None:
+    """ADR-0017: the trusted digest source can live outside the volume —
+    MODEL_REGISTRY_PATH must actually reach the lifespan loader."""
+    models = stage_versions(
+        published_models_dir, tmp_path / "models", ("v1",), with_registry=False
+    )
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    registry = approved / REGISTRY_FILENAME
+    shutil.copy(published_models_dir / REGISTRY_FILENAME, registry)
+    monkeypatch.setenv("MODEL_PATH", str(models))
+    monkeypatch.setenv("MODEL_REGISTRY_PATH", str(registry))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/model/info")
+    assert resp.status_code == 200
+    assert resp.json()["model_version"] == "v1"
 
 
 def test_startup_aborts_when_provenance_fails(

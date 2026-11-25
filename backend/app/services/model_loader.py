@@ -9,17 +9,21 @@ the full gate sequence (ADR-0003, ADR-0013, ADR-0017):
    publication registry (kept outside the version directory), before the
    manifest is even parsed — a joint artifact+manifest substitution with
    self-consistent hashes is rejected here;
-3. manifest structure: supported schema version, version identity and
-   agreement with the trusted artifact digest;
-4. contracts: feature schema version/digest/items and factors schema
-   digest must match the contracts compiled into this API build;
-5. environment: scikit-learn must match the training pin exactly and
-   numpy must share the same major version (the locks already enforce
+3. manifest structure: supported schema version and version identity;
+4. contracts: feature schema version/digest/items, factors schema digest
+   and the target encoding (``No=0``, ``Yes=1``) must match the contracts
+   compiled into this API build;
+5. environment: scikit-learn must match the training pin exactly; numpy
+   and pandas must share the same major version (the locks already enforce
    parity, ADR-0017 — these gates are the runtime tripwire for artifacts
    trained elsewhere; the Python minor version is deliberately not gated
    because the pickle protocol is stable across the supported range);
-6. only then ``joblib.load``, which unpickles potentially unsafe content
-   and therefore runs strictly after every gate.
+6. consistency: the manifest's declared artifact digest must match the
+   trusted registry record;
+7. only then ``joblib.load``, which unpickles potentially unsafe content
+   and therefore runs strictly after every gate; the loaded object must be
+   a probabilistic scorer whose classes are exactly ``[0, 1]``, so the
+   positive class (churn) sits at the probability index serving uses.
 
 The registry verification mirrors ``training/publication.py``: the serving
 image does not ship the training package, so the registry JSON format is
@@ -65,6 +69,9 @@ MANIFEST_FILENAME = "model_meta.json"
 REGISTRY_FILENAME = "publication_registry.json"
 REGISTRY_SCHEMA_VERSION = "1"
 SUPPORTED_MANIFEST_SCHEMA_VERSIONS = frozenset({"2"})
+# The serving probability index assumes this encoding: proba[1] is churn.
+SERVED_TARGET_ENCODING = {"No": 0, "Yes": 1}
+SERVED_CLASSES = [0.0, 1.0]
 _RECORD_FIELDS = (
     "model_version",
     "artifact_sha256",
@@ -229,6 +236,12 @@ def _check_contracts(manifest: ModelManifest) -> None:
             "factors schema digest diverges from the contract served by "
             "this API (ADR-0018)"
         )
+    if manifest.target.encoding != SERVED_TARGET_ENCODING:
+        raise CompatibilityError(
+            f"target encoding {manifest.target.encoding} is not servable by "
+            f"this API ({SERVED_TARGET_ENCODING}): the positive class must "
+            "sit at probability index 1"
+        )
 
 
 def _check_environment(manifest: ModelManifest) -> None:
@@ -245,6 +258,12 @@ def _check_environment(manifest: ModelManifest) -> None:
         raise CompatibilityError(
             f"artifact was trained with numpy {environment.numpy}, serving "
             f"runs {np.__version__}; major versions must match"
+        )
+    serving_pandas_major = pd.__version__.split(".")[0]
+    if environment.pandas.split(".")[0] != serving_pandas_major:
+        raise CompatibilityError(
+            f"artifact was trained with pandas {environment.pandas}, serving "
+            f"runs {pd.__version__}; major versions must match"
         )
 
 
@@ -366,6 +385,13 @@ def load_active_model(
     if not isinstance(scorer, ProbabilisticScorer):
         raise CompatibilityError(
             f"artifact is not a probabilistic scorer: {type(scorer).__name__}"
+        )
+    classes = getattr(scorer, "classes_", None)
+    if classes is None or [float(c) for c in classes] != SERVED_CLASSES:
+        raise CompatibilityError(
+            f"artifact classes {classes!r} do not match the served target "
+            f"encoding {SERVED_TARGET_ENCODING}: the positive class must sit "
+            "at probability index 1"
         )
     logger.info(
         "model %s activated (artifact sha256 %s, trusted source %s)",

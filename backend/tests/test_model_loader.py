@@ -14,19 +14,27 @@ from collections.abc import Callable
 from pathlib import Path
 
 import joblib
+import numpy as np
+import pandas as pd
 import pytest
 
+from app.schemas.manifest import ModelManifest
 from app.services.model_loader import (
     MANIFEST_FILENAME,
     MODEL_FILENAME,
     REGISTRY_FILENAME,
     ArtifactMissingError,
     CompatibilityError,
+    LoadedModel,
     ProvenanceError,
+    TrustedPublication,
     load_active_model,
 )
 from tests.conftest import stage_versions
+from training.features import FEATURES, TARGET
+from training.preprocessing import build_pipeline
 from training.publication import publish
+from training.tests.conftest import synthetic_frame
 
 ManifestMutator = Callable[[dict[str, object]], None]
 
@@ -105,6 +113,37 @@ def test_predict_requires_every_contract_feature(
     del sample_input["tenure"]
     with pytest.raises(ValueError, match="missing contract features"):
         loaded.predict_proba(sample_input)
+
+
+def test_predict_proba_reads_the_positive_class_index(
+    published_models_dir: Path, sample_input: dict[str, object]
+) -> None:
+    """proba[1] is churn: a scorer returning [[0.25, 0.75]] yields 0.75."""
+
+    class _FixedScorer:
+        def predict_proba(self, X: pd.DataFrame) -> object:
+            return np.array([[0.25, 0.75]])
+
+    manifest = ModelManifest.model_validate(
+        json.loads(
+            (published_models_dir / "v1" / MANIFEST_FILENAME).read_text(
+                encoding="utf-8"
+            )
+        )
+    )
+    loaded = LoadedModel(
+        scorer=_FixedScorer(),
+        manifest=manifest,
+        publication=TrustedPublication(
+            model_version="v1",
+            artifact_sha256="a" * 64,
+            manifest_sha256="b" * 64,
+            published_at="2026-01-01T00:00:00+00:00",
+            git_commit="0" * 40,
+        ),
+        trusted_source="test",
+    )
+    assert loaded.predict_proba(sample_input) == 0.75
 
 
 def test_missing_version_directory_fails(published_models_dir: Path) -> None:
@@ -342,6 +381,66 @@ def test_non_scorer_artifact_rejected_after_gates(
     _republish(version_dir, registry)
     with pytest.raises(CompatibilityError, match="not a probabilistic scorer"):
         load_active_model(model_path=models, model_version="v1", registry_path=registry)
+
+
+def test_target_encoding_divergence_rejected(
+    published_models_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _flip_encoding(manifest: dict[str, object]) -> None:
+        _section(manifest, "target")["encoding"] = {"No": 1, "Yes": 0}
+
+    models, registry = _staged_and_republished(
+        published_models_dir, tmp_path, _flip_encoding
+    )
+    _forbid_joblib_load(monkeypatch)
+    with pytest.raises(CompatibilityError, match="target encoding"):
+        load_active_model(
+            model_path=models, model_version="v1", registry_path=registry
+        )
+
+
+def test_pandas_major_divergence_rejected(
+    published_models_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _break_pandas(manifest: dict[str, object]) -> None:
+        _section(manifest, "environment")["pandas"] = "1.5.3"
+
+    models, registry = _staged_and_republished(
+        published_models_dir, tmp_path, _break_pandas
+    )
+    _forbid_joblib_load(monkeypatch)
+    with pytest.raises(CompatibilityError, match="pandas"):
+        load_active_model(
+            model_path=models, model_version="v1", registry_path=registry
+        )
+
+
+def test_reversed_classes_artifact_rejected(
+    published_models_dir: Path, tmp_path: Path
+) -> None:
+    """A scorer whose classes are not [0, 1] can never activate: serving
+    reads the positive-class probability at index 1."""
+    models = stage_versions(published_models_dir, tmp_path / "models", ("v1",))
+    version_dir = models / "v1"
+    df = synthetic_frame(60, 30)
+    y = df[TARGET].map({"No": 1.0, "Yes": 2.0})
+    pipeline = build_pipeline("lr", {}, seed=42)
+    pipeline.fit(df[[spec.name for spec in FEATURES]], y)
+    joblib.dump(pipeline, version_dir / MODEL_FILENAME)
+    artifact_sha256 = hashlib.sha256(
+        (version_dir / MODEL_FILENAME).read_bytes()
+    ).hexdigest()
+
+    def _align_claim(manifest: dict[str, object]) -> None:
+        _section(manifest, "model")["artifact_sha256"] = artifact_sha256
+
+    _edit_manifest(version_dir, _align_claim)
+    registry = tmp_path / "trusted_registry.json"
+    _republish(version_dir, registry)
+    with pytest.raises(CompatibilityError, match="artifact classes"):
+        load_active_model(
+            model_path=models, model_version="v1", registry_path=registry
+        )
 
 
 def test_rollback_between_compatible_versions(

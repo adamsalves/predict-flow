@@ -37,6 +37,7 @@ class ManifestTarget(BaseModel):  # type: ignore[explicit-any]
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     label: str
+    encoding: dict[str, int]
     definition: str
     limitations: str
 
@@ -119,6 +120,7 @@ class ManifestEnvironment(BaseModel):  # type: ignore[explicit-any]
     python: str
     scikit_learn: str = Field(alias="scikit-learn")
     numpy: str
+    pandas: str
     joblib: str
 
 

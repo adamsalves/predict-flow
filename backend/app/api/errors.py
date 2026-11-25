@@ -16,7 +16,7 @@ from app.services.errors import DomainError
 
 # OpenAPI fragment documenting the envelope on every route of a router
 # (issue #40): validation and unexpected failures are possible anywhere.
-COMMON_ERROR_RESPONSES: dict[int, dict[str, object]] = {
+COMMON_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     422: {"model": ErrorResponse, "description": "Request validation failed"},
     500: {"model": ErrorResponse, "description": "Unexpected internal error"},
 }

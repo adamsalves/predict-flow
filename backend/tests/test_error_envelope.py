@@ -98,3 +98,25 @@ def test_unknown_route_uses_envelope() -> None:
     body = resp.json()["error"]
     assert body["code"] == "not_found"
     assert body["request_id"] == resp.headers["x-request-id"]
+
+
+def _envelope_ref(response: dict[str, object]) -> str:
+    content = response["content"]
+    assert isinstance(content, dict)
+    schema = content["application/json"]["schema"]
+    return str(schema["$ref"])
+
+
+def test_openapi_documents_error_envelope(client: TestClient) -> None:
+    """The OpenAPI contract (ADR-0007) shows the envelope on every route."""
+    spec = client.get("/api/openapi.json").json()
+    assert "ErrorResponse" in spec["components"]["schemas"]
+    paths = spec["paths"]
+    live = paths["/api/v1/health/live"]["get"]["responses"]
+    assert set(live) >= {"200", "422", "500"}
+    ready = paths["/api/v1/health/ready"]["get"]["responses"]
+    assert set(ready) >= {"200", "422", "500", "503"}
+    for response in (live["422"], live["500"], ready["503"]):
+        assert _envelope_ref(response).endswith("/ErrorResponse")
+    info = paths["/api/v1/model/info"]["get"]["responses"]
+    assert _envelope_ref(info["503"]).endswith("/ErrorResponse")

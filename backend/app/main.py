@@ -5,11 +5,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.errors import register_error_handlers
+from app.api.middleware import RequestContextMiddleware
 from app.api.v1.health import router as health_router
 from app.api.v1.model import router as model_router
 from app.core.config import get_settings
+from app.core.logging import setup_logging
 from app.services.model_loader import load_active_model
 
+setup_logging()
 settings = get_settings()
 
 
@@ -49,5 +53,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last, runs first: every response — including CORS rejections and
+# error envelopes — carries the request id and an access log line.
+app.add_middleware(RequestContextMiddleware)
+register_error_handlers(app)
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(model_router, prefix="/api/v1")

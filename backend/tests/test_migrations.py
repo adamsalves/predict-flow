@@ -1,5 +1,7 @@
 """Migration tests: upgrade builds the schema, downgrade is defined (#7)."""
 
+import logging
+
 import sqlalchemy as sa
 from alembic import command
 
@@ -63,3 +65,13 @@ def test_downgrade_base_drops_schema_and_upgrade_restores(
     assert DOMAIN_TABLES.isdisjoint(_table_names(fresh_db_url))
     command.upgrade(config, "head")
     assert DOMAIN_TABLES <= _table_names(fresh_db_url)
+
+
+def test_in_process_migration_keeps_existing_loggers_enabled(
+    fresh_db_url: str,
+) -> None:
+    """fileConfig defaults to disabling pre-existing loggers; migrations
+    running in-process (tests, workers) must not silence the app's loggers."""
+    probe = logging.getLogger("predict_flow.migration_probe")
+    command.upgrade(_alembic_config(fresh_db_url), "head")
+    assert not probe.disabled

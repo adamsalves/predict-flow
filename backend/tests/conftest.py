@@ -22,13 +22,16 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session
 
+from app.api.errors import register_error_handlers
+from app.api.middleware import RequestContextMiddleware
 from app.core.config import get_settings
-from app.db.session import database_available
+from app.db.session import database_available, to_psycopg_dsn
 from app.main import app
 from app.services.model_loader import REGISTRY_FILENAME
 from training.dataset import DatasetProvenance
@@ -63,6 +66,18 @@ SAMPLE_INPUT: dict[str, object] = {
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(app)
+
+
+def build_conventions_app() -> FastAPI:
+    """A bare app wired with the cross-cutting conventions (issue #40).
+
+    Test-only routes exercise the real middleware and exception handlers
+    without shipping fake endpoints in the production application.
+    """
+    test_app = FastAPI()
+    test_app.add_middleware(RequestContextMiddleware)
+    register_error_handlers(test_app)
+    return test_app
 
 
 @pytest.fixture(scope="session")
@@ -127,9 +142,7 @@ def _alembic_config(url: str) -> AlembicConfig:
 
 def _admin_dsn() -> str:
     url = make_url(get_settings().DATABASE_URL).set(database="postgres")
-    return url.render_as_string(hide_password=False).replace(
-        "postgresql+psycopg://", "postgresql://"
-    )
+    return to_psycopg_dsn(url.render_as_string(hide_password=False))
 
 
 def _create_database() -> tuple[str, str]:

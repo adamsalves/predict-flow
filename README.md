@@ -86,6 +86,17 @@ alembic downgrade base   # desfaz tudo (comportamento definido e testado)
 
 A URL de conexão vem sempre da configuração da aplicação (`DATABASE_URL`) — nunca é fixada no `alembic.ini`. A suíte de testes cria bancos temporários no Postgres real, aplica a migração neles e valida constraints, índices e concorrência contra o banco (sem mocks do ORM); sem Postgres, esses testes se auto-pulam.
 
+## Convenções transversais da API
+
+Estabelecidas na issue #40 (ADR-0007/0012/0014), valem para todo endpoint de domínio — nenhum router reimplementa estas peças:
+
+- **Envelope de erro único**: validação (422), domínio (400), concorrência otimista (409), HTTP e falha inesperada (500) saem no mesmo formato — `{"error": {"code", "message", "request_id", "details?"}}` — documentado no OpenAPI. A resposta nunca carrega payload, features, segredos ou stack trace; detalhes de validação omitem o valor de entrada (PII).
+- **`X-Request-ID`**: gerado (UUID) ou propagado quando seguro (curto, charset log-safe); a resposta e a linha de log compartilham o mesmo id.
+- **Logs JSON de acesso**: uma linha por request com método, rota (template com parâmetros mascarados — nunca o path cru, que pode conter PII), status e latência. Payloads, headers e query strings nunca são logados.
+- **Sessão por request** (ADR-0012): a dependency `get_session` cria uma sessão por request/operação e sempre a fecha; services delimitam transações e o fechamento sem commit reverte o trabalho pendente.
+- **Paginação**: `limit` (1–100, default 20) e `offset` via dependency `page_params`; `paginate` aplica ordenação estável com desempate único (chave primária) e retorna o total. Páginas não repetem nem omitem linhas sob escritas concorrentes.
+- **Readiness limitada**: `/health/ready` sonda o banco com `connect_timeout` + `statement_timeout` derivados de `DB_READINESS_TIMEOUT_SECONDS` (default 2s) — banco lento ou inalcançável retorna 503 no envelope em tempo limitado.
+
 ## Testes
 
 Com Python 3.12+:

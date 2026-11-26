@@ -40,7 +40,11 @@ from app.schemas.explanation import (
 from app.schemas.features import FEATURE_SCHEMA_VERSION, feature_schema_digest
 from app.schemas.prediction import PredictRequest, PredictResponse
 from app.services.customers import register_customer
-from app.services.errors import IdempotencyConflictError, InferenceBusyError
+from app.services.errors import (
+    ConcurrencyConflictError,
+    IdempotencyConflictError,
+    InferenceBusyError,
+)
 from app.services.explain import explain_local
 from app.services.model_loader import LoadedModel
 from app.services.predictions import find_by_idempotency_key, record_prediction
@@ -67,6 +71,18 @@ def _conflict(key: str) -> IdempotencyConflictError:
     return IdempotencyConflictError(
         f"idempotency key {key!r} was already used with a different payload"
     )
+
+
+# Partial unique index that arbitrates the activation race per
+# (customer, origin): the database is the final protection (ADR-0014).
+_CURRENT_PREDICTION_INDEX = "uq_churn_predictions_current"
+
+
+def _violated_constraint(exc: IntegrityError) -> str | None:
+    """Constraint name reported by the driver, when available."""
+    diag = getattr(exc.orig, "diag", None)
+    name: str | None = getattr(diag, "constraint_name", None)
+    return name
 
 
 def _response_from_row(loaded: LoadedModel, row: ChurnPrediction) -> PredictResponse:
@@ -165,8 +181,17 @@ def predict(
                 idempotency_key=idempotency_key,
                 request_payload_sha256=payload_hash,
             )
-        except IntegrityError:
+        except IntegrityError as exc:
             session.rollback()
+            if _violated_constraint(exc) == _CURRENT_PREDICTION_INDEX:
+                # The activation race for (customer, origin) was lost: a
+                # concurrent request committed first. Nothing from this
+                # call was persisted, so retrying with the same key is
+                # safe and takes the replay path (ADR-0014).
+                raise ConcurrencyConflictError(
+                    "a concurrent prediction for this customer was recorded"
+                    " first; retry the same idempotency key"
+                ) from exc
             with factory() as replay:
                 winner = find_by_idempotency_key(replay, idempotency_key)
             if winner is None:

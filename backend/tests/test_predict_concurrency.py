@@ -185,3 +185,64 @@ def test_concurrent_distinct_customers_all_persist_consistently(
         engine.dispose()
     assert len(rows) == 4
     assert current_per_customer == 4  # one current prediction per customer
+
+
+def test_same_customer_different_keys_activation_race_returns_409(
+    predict_client: TestClient,
+    migrated_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two concurrent calls for the same customer with different keys race
+    on the partial unique index of the current prediction: the loser gets
+    a retryable domain 409, never a bare 500 (ADR-0014)."""
+    external_id = f"cust-{_key()}"
+    # Register the identity up front so both calls race only on the
+    # prediction activation, not on the customer get-or-create.
+    engine = create_engine(migrated_db_url)
+    try:
+        with Session(engine) as session:
+            session.add(Customer(customer_id_ext=external_id))
+            session.commit()
+    finally:
+        engine.dispose()
+
+    barrier = threading.Barrier(2)
+    real_commit = Session.commit
+
+    def barrier_commit(self: Session) -> None:
+        # Hold both prediction commits until each transaction has issued
+        # its deactivation UPDATE — then exactly one insert can win the
+        # partial unique index.
+        if any(isinstance(obj, ChurnPrediction) for obj in self.new):
+            barrier.wait(timeout=10)
+        real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", barrier_commit)
+    keys = [_key(), _key()]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(_post, TestClient(predict_client.app), key, external_id)
+            for key in keys
+        ]
+        responses = [future.result() for future in futures]
+    assert sorted(resp.status_code for resp in responses) == [201, 409]
+    conflict = next(resp for resp in responses if resp.status_code == 409)
+    assert conflict.json()["error"]["code"] == "concurrency_conflict"
+
+    engine = create_engine(migrated_db_url)
+    try:
+        with Session(engine) as session:
+            current = session.scalar(
+                select(func.count(ChurnPrediction.id))
+                .where(ChurnPrediction.is_current.is_(True))
+                .where(
+                    ChurnPrediction.customer_id.in_(
+                        select(Customer.id).where(
+                            Customer.customer_id_ext == external_id
+                        )
+                    )
+                )
+            )
+    finally:
+        engine.dispose()
+    assert current == 1

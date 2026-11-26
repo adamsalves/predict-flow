@@ -6,6 +6,7 @@ conflicts, and a persistence failure never returns an audited success.
 """
 
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ChurnPrediction
 from app.services import predictions as predictions_service
+from app.services.model_loader import LoadedModel
 from tests.conftest import SAMPLE_INPUT
 
 
@@ -58,6 +60,25 @@ def test_equivalent_retry_replays_without_duplicating(
     assert replay.status_code == 200
     assert replay.json() == first.json()
     assert _count_by_key(migrated_db_url, key) == 1
+
+
+def test_replay_does_not_rescore(
+    predict_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replay returns the recorded row: the scorer runs exactly once."""
+    calls = 0
+    original = LoadedModel.predict_proba
+
+    def counting(self: LoadedModel, features: Mapping[str, object]) -> float:
+        nonlocal calls
+        calls += 1
+        return original(self, features)
+
+    monkeypatch.setattr(LoadedModel, "predict_proba", counting)
+    key = _key()
+    assert _predict(predict_client, dict(SAMPLE_INPUT), key).status_code == 201
+    assert _predict(predict_client, dict(SAMPLE_INPUT), key).status_code == 200
+    assert calls == 1
 
 
 def test_semantically_shuffled_payload_still_replays(

@@ -26,7 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.errors import register_error_handlers
 from app.api.middleware import RequestContextMiddleware
@@ -78,6 +78,33 @@ def build_conventions_app() -> FastAPI:
     test_app.add_middleware(RequestContextMiddleware)
     register_error_handlers(test_app)
     return test_app
+
+
+@pytest.fixture
+def predict_client(
+    monkeypatch: pytest.MonkeyPatch,
+    published_models_dir: Path,
+    migrated_db_url: str,
+) -> Iterator[TestClient]:
+    """Live-lifespan client with the real published model (issue #9).
+
+    ``SessionLocal`` is repointed to the throwaway database so persistence
+    paths exercise the real wiring; the model is the actual training
+    artifact published by ``training.train``.
+    """
+    monkeypatch.setenv("MODEL_PATH", str(published_models_dir))
+    monkeypatch.setenv("MODEL_VERSION", "v1")
+    monkeypatch.delenv("MODEL_REGISTRY_PATH", raising=False)
+    get_settings.cache_clear()
+    engine = create_engine(migrated_db_url)
+    maker = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr("app.db.session.SessionLocal", maker)
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
 
 
 @pytest.fixture(scope="session")

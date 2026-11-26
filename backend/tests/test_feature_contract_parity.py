@@ -16,7 +16,10 @@ from app.schemas.features import (
     FEATURES,
     feature_schema_digest,
 )
+from app.schemas.prediction import PredictRequest
 from app.services import model_loader
+
+_DTYPE_NAME: dict[type[object], str] = {str: "str", int: "int", float: "float"}
 
 
 def test_feature_contract_matches_training() -> None:
@@ -27,6 +30,26 @@ def test_feature_contract_matches_training() -> None:
         (spec.name, spec.dtype, spec.required) for spec in training.features.FEATURES
     ]
     assert served == trained
+
+
+def test_predict_request_schema_matches_feature_contract() -> None:
+    """The static API schema mirrors the serving contract (issue #9).
+
+    A field present here but absent from the contract would be silently
+    ignored by inference yet enter the idempotency hash and the audit
+    snapshot — the drift must fail loudly instead (ADR-0013).
+    """
+    fields = {
+        name: field
+        for name, field in PredictRequest.model_fields.items()
+        if name != "customer_id_ext"
+    }
+    assert list(fields) == [spec.name for spec in FEATURES]
+    for spec in FEATURES:
+        annotation = fields[spec.name].annotation
+        assert annotation in _DTYPE_NAME, f"{spec.name}: unexpected {annotation}"
+        assert _DTYPE_NAME[annotation] == spec.dtype
+        assert fields[spec.name].is_required() is spec.required
 
 
 def test_registry_format_matches_training() -> None:

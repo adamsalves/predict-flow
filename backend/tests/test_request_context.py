@@ -41,7 +41,7 @@ def test_request_id_propagated_when_safe(client: TestClient) -> None:
 
 
 def test_request_id_replaced_when_unsafe(client: TestClient) -> None:
-    for unsafe in ("id with spaces", "x" * 100):
+    for unsafe in ("id with spaces", "bad\nid", "bad\tid", "x" * 100):
         resp = client.get("/api/v1/health/live", headers={"X-Request-ID": unsafe})
         assert REQUEST_ID_PATTERN.match(resp.headers["x-request-id"])
         assert resp.headers["x-request-id"] != unsafe

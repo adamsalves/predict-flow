@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +14,7 @@ class Settings(BaseSettings):  # type: ignore[explicit-any]
     # Bounded database readiness probe (issue #40): connect and statement
     # timeouts derive from this budget, so a slow database cannot hang
     # /health/ready.
-    DB_READINESS_TIMEOUT_SECONDS: float = 2.0
+    DB_READINESS_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
     MODEL_PATH: str = "/models"
     # Active model version (ADR-0003): activation and rollback are config
     # changes plus a process restart, never runtime hot-swaps.

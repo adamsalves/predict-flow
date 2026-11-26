@@ -145,6 +145,33 @@ class ChurnPrediction(Base):
         sa.CheckConstraint(
             "customer_id IS NOT NULL OR NOT is_current", name="sandbox_not_current"
         ),
+        # Idempotency key normalized (issue #9); hash is lowercase SHA-256;
+        # both appear together — a key without its payload hash is malformed.
+        sa.CheckConstraint(
+            "idempotency_key IS NULL"
+            " OR (idempotency_key <> ''"
+            " AND idempotency_key = btrim(idempotency_key))",
+            name="idempotency_key_normalized",
+        ),
+        sa.CheckConstraint(
+            f"request_payload_sha256 IS NULL"
+            f" OR request_payload_sha256 ~ '{_DIGEST_HEX_PATTERN}'",
+            name="request_payload_sha256_hex",
+        ),
+        sa.CheckConstraint(
+            "(idempotency_key IS NULL) = (request_payload_sha256 IS NULL)",
+            name="idempotency_key_payload_paired",
+        ),
+        # A key records exactly one operation result; the database, not
+        # application locking, is the final arbiter of concurrent retries
+        # with the same key (ADR-0014). Rows without a key (backfill, batch)
+        # stay outside the constraint.
+        sa.Index(
+            "uq_churn_predictions_idempotency_key",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa.text("idempotency_key IS NOT NULL"),
+        ),
         # Single current prediction per (customer, origin); sandbox rows
         # (NULL customer) are outside the projection by construction.
         sa.Index(
@@ -186,6 +213,13 @@ class ChurnPrediction(Base):
         sa.ForeignKey("customers.id", ondelete="RESTRICT")
     )
     batch_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid)
+    # Idempotency (ADR-0014, issue #9): the API key handed by the client for
+    # this exact operation, bound to a canonical payload hash. NULL only for
+    # rows written outside the idempotent API path (backfill, batch #18).
+    # The unique index is the final race protection: a concurrent insert
+    # with the same key loses at commit.
+    idempotency_key: Mapped[str | None] = mapped_column(sa.Text)
+    request_payload_sha256: Mapped[str | None] = mapped_column(sa.Text)
     model_version: Mapped[str] = mapped_column(sa.Text)
     churn_probability: Mapped[float] = mapped_column(sa.Float)
     decision_threshold: Mapped[float | None] = mapped_column(sa.Float)

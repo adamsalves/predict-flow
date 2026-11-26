@@ -12,6 +12,7 @@ DOMAIN_TABLES = {"customers", "customer_services", "churn_predictions"}
 EXPECTED_INDEXES = {
     "churn_predictions": {
         "uq_churn_predictions_current",
+        "uq_churn_predictions_idempotency_key",
         "ix_churn_predictions_customer_history",
         "ix_churn_predictions_batch",
         "ix_churn_predictions_origin_score",

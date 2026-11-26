@@ -20,6 +20,13 @@ from app.models import ChurnPrediction, DataOrigin, JsonValue
 from app.services.errors import ConcurrencyConflictError
 
 
+def find_by_idempotency_key(session: Session, key: str) -> ChurnPrediction | None:
+    """Fetch the recorded result of a previous call with this key (issue #9)."""
+    return session.scalar(
+        select(ChurnPrediction).where(ChurnPrediction.idempotency_key == key)
+    )
+
+
 def record_prediction(
     session: Session,
     *,
@@ -39,6 +46,8 @@ def record_prediction(
     feature_as_of: datetime | None = None,
     outcome_window_start: datetime | None = None,
     outcome_window_end: datetime | None = None,
+    idempotency_key: str | None = None,
+    request_payload_sha256: str | None = None,
     activate: bool = True,
 ) -> ChurnPrediction:
     """Insert a prediction and atomically move the current marker.
@@ -47,6 +56,10 @@ def record_prediction(
     and never enter the customer worklist. A concurrent activation for the
     same (customer, origin) loses at commit on the partial unique index —
     the database, not application locking, is the final arbiter (ADR-0014).
+    ``idempotency_key``/``request_payload_sha256`` bind the row to one API
+    call (issue #9); a concurrent insert with the same key raises
+    ``IntegrityError`` at commit, which the caller resolves into a replay
+    or a conflict.
     """
     becomes_current = activate and customer_id is not None
     if becomes_current:
@@ -62,6 +75,8 @@ def record_prediction(
     prediction = ChurnPrediction(
         customer_id=customer_id,
         batch_id=batch_id,
+        idempotency_key=idempotency_key,
+        request_payload_sha256=request_payload_sha256,
         model_version=model_version,
         churn_probability=churn_probability,
         decision_threshold=decision_threshold,

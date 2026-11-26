@@ -1,3 +1,4 @@
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,6 +10,7 @@ from app.api.errors import register_error_handlers
 from app.api.middleware import RequestContextMiddleware
 from app.api.v1.health import router as health_router
 from app.api.v1.model import router as model_router
+from app.api.v1.predictions import router as predictions_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.services.model_loader import load_active_model
@@ -37,8 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             else None
         ),
     )
+    # Inference concurrency ceiling (issue #9, ADR-0012): excess requests
+    # fail fast with 429 instead of queueing in the threadpool.
+    app.state.predict_semaphore = threading.BoundedSemaphore(
+        current.PREDICT_MAX_CONCURRENCY
+    )
     yield
     app.state.loaded_model = None
+    app.state.predict_semaphore = None
 
 
 app = FastAPI(
@@ -59,3 +67,4 @@ app.add_middleware(RequestContextMiddleware)
 register_error_handlers(app)
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(model_router, prefix="/api/v1")
+app.include_router(predictions_router, prefix="/api/v1")

@@ -72,6 +72,8 @@ bash scripts/check_artifact_ignores.sh      # artefatos/datasets fora do git e d
 
 - Rotas em `app/api/v1/`, uma por domínio, prefixo comum `/api/v1`; regras de negócio em `services/`, nunca na rota.
 - Convenções transversais (issue #40) são consumidas, nunca reimplementadas: erros saem no envelope comum via handlers globais (`app/api/errors.py` — services levantam `DomainError` e subclasses, nunca `HTTPException`); routers declaram `COMMON_ERROR_RESPONSES`; listagens usam `page_params` + `paginate`; `request_id` e log de acesso JSON são automáticos (middleware).
+- Operações mutáveis com retry seguem a política de idempotência (ADR-0014, #9): chave obrigatória, hash canônico do payload, resultado persistido, 409 para payload divergente — constraints do banco são a proteção final, não locks de aplicação.
+- Inferência e SHAP nunca rodam dentro de sessão/transação de banco; trabalho pesado passa por limite de concorrência explícito (semáforo no lifespan, `PREDICT_MAX_CONCURRENCY`), com excedente em 429, não fila (#9, ADR-0012).
 - Config via pydantic-settings (`app/core/config.py`), nunca hardcoded; credenciais de demo local não são segredos (ADR-0010).
 - Um teste pytest para cada comportamento novo; bugfix vem com teste de regressão que falha antes da correção.
 - Código, comentários e docstrings em inglês (ver "Idioma").

@@ -97,6 +97,32 @@ Estabelecidas na issue #40 (ADR-0007/0012/0014), valem para todo endpoint de dom
 - **Paginação**: `limit` (1–100, default 20) e `offset` via dependency `page_params`; `paginate` aplica ordenação estável com desempate único (chave primária) e retorna o total. Páginas não repetem nem omitem linhas sob escritas concorrentes.
 - **Readiness limitada**: `/health/ready` sonda o banco com `connect_timeout` + `statement_timeout` derivados de `DB_READINESS_TIMEOUT_SECONDS` (default 2s) — banco lento ou inalcançável retorna 503 no envelope em tempo limitado.
 
+## Predição: `POST /api/v1/predict` (issue #9)
+
+Inferência síncrona persistida, com auditoria mínima e retry seguro:
+
+- **Request estático** com as 19 features do contrato (tipos validados estritamente — string onde o contrato diz `int` é 422, não coerção silenciosa; ADR-0013) + `customer_id_ext` opcional — ausente marca sandbox anônima, que nunca entra na projeção vigente nem na worklist.
+- **`Idempotency-Key` obrigatório** (ADR-0014): mesma chave com payload equivalente → **200** com o resultado gravado, sem duplicar; mesma chave com payload diferente → **409**; nova predição intencional usa chave nova e preserva o histórico (append-only).
+- **Resposta 201** com probabilidade, `risk_level` provisório (threshold versionado do manifesto), explicação no DTO estável com método/unidade (ADR-0018), `model_version`, `score_at` e a limitação do target. Scores da demo são **históricos/simulados** — nunca "churn em N dias" (ADR-0009); `feature_as_of` permanece ausente de forma explícita.
+- **Concorrência limitada** por `PREDICT_MAX_CONCURRENCY` (default 2, `ge=1`): excedente falha rápido com **429** em vez de enfileirar na threadpool; inferência e SHAP rodam **fora de qualquer sessão/transação de banco** (ADR-0012/ADR-0014) — endpoint `def`, nunca `async def`.
+- **Falha de persistência após inferência nunca retorna sucesso auditado**: o erro propaga no envelope comum e o retry com a mesma chave é seguro (inferência determinística).
+
+Exemplo contra o ambiente do Quickstart:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/predict \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-0001' \
+  -d '{
+    "gender": "Female", "SeniorCitizen": 0, "Partner": "Yes", "Dependents": "No",
+    "tenure": 12, "PhoneService": "Yes", "MultipleLines": "No",
+    "InternetService": "Fiber optic", "OnlineSecurity": "No", "OnlineBackup": "Yes",
+    "DeviceProtection": "No", "TechSupport": "No", "StreamingTV": "Yes",
+    "StreamingMovies": "No", "Contract": "Month-to-month", "PaperlessBilling": "Yes",
+    "PaymentMethod": "Electronic check", "MonthlyCharges": 89.5, "TotalCharges": 1074.0
+  }'
+```
+
 ## Testes
 
 Com Python 3.12+:

@@ -19,3 +19,21 @@ class ConcurrencyConflictError(DomainError):
 
     status_code = 409
     code = "concurrency_conflict"
+
+
+class IdempotencyConflictError(DomainError):
+    """An idempotency key was reused with a different payload (ADR-0014)."""
+
+    status_code = 409
+    code = "idempotency_conflict"
+
+
+class InferenceBusyError(DomainError):
+    """The inference concurrency limit is saturated (ADR-0012).
+
+    The client may retry later; the limit protects threadpool and latency
+    instead of queueing unbounded work.
+    """
+
+    status_code = 429
+    code = "too_many_requests"

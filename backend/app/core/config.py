@@ -15,6 +15,10 @@ class Settings(BaseSettings):  # type: ignore[explicit-any]
     # timeouts derive from this budget, so a slow database cannot hang
     # /health/ready.
     DB_READINESS_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0)
+    # Inference/explanation concurrency ceiling (issue #9, ADR-0012):
+    # excess requests fail fast with 429 instead of queueing in the
+    # threadpool.
+    PREDICT_MAX_CONCURRENCY: int = Field(default=2, ge=1)
     MODEL_PATH: str = "/models"
     # Active model version (ADR-0003): activation and rollback are config
     # changes plus a process restart, never runtime hot-swaps.

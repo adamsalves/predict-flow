@@ -103,6 +103,46 @@ def test_schema_digest_must_be_hex64(db_session: Session, digest: str) -> None:
         db_session.flush()
 
 
+@pytest.mark.parametrize("key", ["", "  ", " key", "key "])
+def test_idempotency_key_normalized(db_session: Session, key: str) -> None:
+    customer = _customer(db_session, "C-IK")
+    db_session.add(
+        _prediction(
+            customer.id, idempotency_key=key, request_payload_sha256="c" * 64
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("digest", ["xyz", "A" * 64, "a" * 63])
+def test_request_payload_sha256_must_be_hex64(
+    db_session: Session, digest: str
+) -> None:
+    customer = _customer(db_session, "C-PH")
+    db_session.add(
+        _prediction(
+            customer.id, idempotency_key="k-1", request_payload_sha256=digest
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_idempotency_key_without_payload_hash_rejected(db_session: Session) -> None:
+    customer = _customer(db_session, "C-KP")
+    db_session.add(_prediction(customer.id, idempotency_key="k-1"))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_payload_hash_without_idempotency_key_rejected(db_session: Session) -> None:
+    customer = _customer(db_session, "C-PK")
+    db_session.add(_prediction(customer.id, request_payload_sha256="c" * 64))
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_factors_must_be_object(db_session: Session) -> None:
     customer = _customer(db_session, "C-FA")
     prediction = _prediction(customer.id)

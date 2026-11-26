@@ -15,6 +15,7 @@ of the demo target (ADR-0009).
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime
 from typing import Annotated, Literal
@@ -34,9 +35,18 @@ DEMO_SCOPE_NOTE = (
 
 
 def _numeric_only(value: object) -> object:
-    """Float contract: JSON numbers only — never strings or booleans."""
+    """Float contract: finite JSON numbers only — never strings or booleans."""
     if isinstance(value, bool) or isinstance(value, str):
         raise ValueError("expected a JSON number")
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            # json.loads accepts NaN/Infinity literals; a non-finite charge
+            # would otherwise surface as a bare 500 at the database CHECK.
+            raise ValueError("expected a finite JSON number")
+        if value == 0.0:
+            # -0.0 and 0.0 are the same charge; normalizing keeps the
+            # canonical idempotency hash stable (ADR-0014).
+            return 0.0
     return value
 
 

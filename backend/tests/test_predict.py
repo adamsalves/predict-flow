@@ -166,6 +166,23 @@ def test_non_numeric_float_contract_is_422(
     assert resp.status_code == 422
 
 
+@pytest.mark.parametrize("field", ["MonthlyCharges", "TotalCharges"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_number_is_422_not_500(
+    predict_client: TestClient, field: str, bad: float
+) -> None:
+    """json.loads accepts NaN/Infinity literals; the contract rejects them
+    at 422 instead of letting a non-finite score die at the DB CHECK (500)."""
+    payload = json.dumps({**SAMPLE_INPUT, field: bad})
+    resp = predict_client.post(
+        "/api/v1/predict",
+        content=payload,
+        headers={"Content-Type": "application/json", "Idempotency-Key": _key()},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "validation_error"
+
+
 def test_predict_503_when_model_not_loaded(predict_client: TestClient) -> None:
     app.state.loaded_model = None
     resp = _predict(predict_client, dict(SAMPLE_INPUT), _key())

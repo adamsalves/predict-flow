@@ -75,6 +75,24 @@ def test_semantically_shuffled_payload_still_replays(
     assert _count_by_key(migrated_db_url, key) == 1
 
 
+def test_negative_zero_replays_as_positive_zero(
+    predict_client: TestClient, migrated_db_url: str
+) -> None:
+    """-0.0 and 0.0 are the same charge: the schema normalizes the sign, so
+    the canonical hash matches and the retry replays instead of 409."""
+    key = _key()
+    first = _predict(
+        predict_client, {**SAMPLE_INPUT, "MonthlyCharges": -0.0}, key
+    )
+    assert first.status_code == 201
+    replay = _predict(
+        predict_client, {**SAMPLE_INPUT, "MonthlyCharges": 0.0}, key
+    )
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert _count_by_key(migrated_db_url, key) == 1
+
+
 def test_same_key_with_different_payload_conflicts(
     predict_client: TestClient, migrated_db_url: str
 ) -> None:

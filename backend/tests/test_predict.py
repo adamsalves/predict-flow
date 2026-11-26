@@ -204,6 +204,6 @@ def test_openapi_documents_predict_contract(
     assert "PredictResponse" in spec["components"]["schemas"]
 
 
-def test_app_state_is_clean_after_lifespan(predict_client: TestClient) -> None:
+def test_app_state_is_populated_during_lifespan(predict_client: TestClient) -> None:
     assert app.state.loaded_model is not None
     assert app.state.predict_semaphore is not None

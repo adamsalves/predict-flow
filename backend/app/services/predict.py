@@ -9,14 +9,18 @@ The orchestration keeps expensive work outside database sessions (ADR-0014):
    when saturated the call fails fast with 429 instead of queueing;
 3. scoring and SHAP run with no session open, so no transaction or
    connection is held while the CPU works;
-4. persistence happens in one short transaction; the unique index on the
-   idempotency key is the final race protection — a concurrent commit with
-   the same key resolves to the winner's row (same payload) or a 409
-   (different payload), never a duplicate.
+4. persistence happens in short transactions — the customer get-or-create
+   commits on its own and the prediction insert commits separately — and
+   the unique indexes are the final race protection: a concurrent commit
+   with the same key resolves to the winner's row (same payload) or a 409
+   (different payload), and a lost activation race for the same customer
+   surfaces as a retryable 409, never a duplicate.
 
 A persistence failure after inference never returns an audited success:
-the error propagates, nothing is committed, and a retry with the same key
-recomputes the (deterministic) result and commits it once.
+the error propagates, the prediction is not committed, and a retry with
+the same key recomputes the (deterministic) result and commits it once.
+A newly registered customer may already be committed by then — the
+get-or-create is idempotent, so the retry simply reuses the identity.
 """
 
 from __future__ import annotations
@@ -86,7 +90,13 @@ def _violated_constraint(exc: IntegrityError) -> str | None:
 
 
 def _response_from_row(loaded: LoadedModel, row: ChurnPrediction) -> PredictResponse:
-    """Rebuild the API response from the persisted row — replay-stable."""
+    """Rebuild the API response from the persisted row — replay-stable.
+
+    Target metadata comes from the *active* model's manifest: after a
+    model swap, a replay pairs the recorded version's score with the
+    active version's target notes. Accepted in the demo (the Telco target
+    is stable across versions); revisit if versions ever diverge on it.
+    """
     explanation = LocalExplanation.model_validate(row.factors)
     band = row.risk_band
     if band == "high":

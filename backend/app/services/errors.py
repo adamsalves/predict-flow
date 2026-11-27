@@ -28,6 +28,22 @@ class IdempotencyConflictError(DomainError):
     code = "idempotency_conflict"
 
 
+class OutcomeWindowNotMatureError(DomainError):
+    """A prospective negative outcome was asserted before the outcome
+    window matured (ADR-0005/0009, issue #10): censoring and incomplete
+    follow-up stay distinct from a confirmed negative."""
+
+    status_code = 409
+    code = "outcome_window_not_mature"
+
+
+class PredictionNotFoundError(DomainError):
+    """No prediction exists for the requested identifier (issue #10)."""
+
+    status_code = 404
+    code = "prediction_not_found"
+
+
 class InferenceBusyError(DomainError):
     """The inference concurrency limit is saturated (ADR-0012).
 

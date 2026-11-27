@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.models import ChurnPrediction, Customer, DataOrigin
 from app.services.customers import register_customer
-from app.services.errors import ConcurrencyConflictError
+from app.services.errors import ConcurrencyConflictError, PredictionNotFoundError
 from app.services.predictions import record_outcome, record_prediction
 
 SCORE_AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -121,7 +121,7 @@ def test_record_outcome_first_record_and_correction(db_session: Session) -> None
 
 
 def test_record_outcome_unknown_prediction(db_session: Session) -> None:
-    with pytest.raises(ValueError, match="unknown prediction"):
+    with pytest.raises(PredictionNotFoundError, match="was not found"):
         record_outcome(
             db_session,
             uuid.uuid4(),

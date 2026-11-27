@@ -7,7 +7,12 @@ from alembic import command
 
 from tests.conftest import _alembic_config
 
-DOMAIN_TABLES = {"customers", "customer_services", "churn_predictions"}
+DOMAIN_TABLES = {
+    "customers",
+    "customer_services",
+    "churn_predictions",
+    "outcome_idempotency",
+}
 
 EXPECTED_INDEXES = {
     "churn_predictions": {
@@ -66,6 +71,42 @@ def test_downgrade_base_drops_schema_and_upgrade_restores(
     assert DOMAIN_TABLES.isdisjoint(_table_names(fresh_db_url))
     command.upgrade(config, "head")
     assert DOMAIN_TABLES <= _table_names(fresh_db_url)
+
+
+def test_outcome_idempotency_catalog_is_in_the_database(
+    fresh_db_url: str,
+) -> None:
+    """The registry key's unique constraint and the payload digest CHECK
+    exist in the database, not only in the ORM (ADR-0014: verified in the
+    catalog — the service resolves the first-write race by the
+    driver-reported constraint name, issue #10)."""
+    command.upgrade(_alembic_config(fresh_db_url), "head")
+    engine = sa.create_engine(fresh_db_url)
+    try:
+        with engine.connect() as connection:
+            indexes = {
+                str(row[0])
+                for row in connection.execute(
+                    sa.text(
+                        "SELECT indexname FROM pg_indexes"
+                        " WHERE tablename = 'outcome_idempotency'"
+                    )
+                )
+            }
+            assert "uq_outcome_idempotency_key" in indexes
+            checks = {
+                str(row[0])
+                for row in connection.execute(
+                    sa.text(
+                        "SELECT conname FROM pg_constraint"
+                        " WHERE conrelid = 'outcome_idempotency'::regclass"
+                        " AND contype = 'c'"
+                    )
+                )
+            }
+            assert "ck_outcome_idempotency_payload_sha256_hex" in checks
+    finally:
+        engine.dispose()
 
 
 def test_in_process_migration_keeps_existing_loggers_enabled(

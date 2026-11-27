@@ -22,6 +22,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, Strict
 
+from app.models.base import DataOrigin
 from app.schemas.explanation import LocalExplanation
 
 # Scores produced by the demo API are historical/simulated: the Telco
@@ -107,3 +108,37 @@ class PredictResponse(BaseModel):  # type: ignore[explicit-any]  # see PredictRe
     feature_as_of: None = None
     scope_note: str = DEMO_SCOPE_NOTE
     explanation: LocalExplanation
+
+
+class OutcomeState(BaseModel):  # type: ignore[explicit-any]  # see PredictRequest
+    """The audited outcome of one prediction (issue #10, ADR-0005).
+
+    ``actual_churn`` is born null (censored, never a confirmed negative)
+    and ``outcome_version`` is the handle the client reads to build the
+    next patch with its ``expected_version``.
+    """
+
+    actual_churn: bool | None
+    outcome_origin: DataOrigin | None
+    outcome_recorded_by: str | None
+    outcome_observed_at: datetime | None
+    outcome_recorded_at: datetime | None
+    outcome_updated_at: datetime | None
+    censored_at: datetime | None
+    outcome_version: int
+
+
+class PredictionSummary(BaseModel):  # type: ignore[explicit-any]  # see PredictRequest
+    """One persisted prediction as served by the outcome patch and the
+    list endpoint (issue #10, D7)."""
+
+    prediction_id: uuid.UUID
+    customer_id_ext: str | None
+    model_version: str
+    data_origin: DataOrigin
+    score_at: datetime
+    churn_probability: float = Field(ge=0.0, le=1.0)
+    decision_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_band: str | None
+    is_current: bool
+    outcome: OutcomeState

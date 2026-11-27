@@ -1,10 +1,13 @@
 """Outcome application with key-based idempotency (issue #10, ADR-0014).
 
-One idempotency key binds one canonical payload to one recorded result:
-an equivalent retry replays the stored state without re-executing the
-update, a reused key with a different payload conflicts, and a concurrent
-first write of the registry row is arbitrated by the database's unique
-constraint — the loser re-reads the winner and answers the winner's state.
+One idempotency key binds one canonical payload to one recorded result on
+one prediction — the operation is (key, prediction, payload), so the
+target id takes part in the canonical hash: a retry against another
+prediction conflicts instead of answering a state it never produced. An
+equivalent retry replays the stored state without re-executing the update,
+and a concurrent first write of the registry row is arbitrated by the
+database's unique constraint — different targets hash differently, so the
+loser of the race always conflicts.
 
 The outcome origin is always derived from the prediction row (ADR-0006),
 never accepted from the client; the maturity CHECK for prospective
@@ -17,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -40,9 +43,15 @@ _MATURITY_CHECK = "ck_churn_predictions_prospective_negative_maturity"
 # registry row (ADR-0014).
 _KEY_UNIQUE = "uq_outcome_idempotency_key"
 
+# Versioned canonical form (issue #10): changing the hash shape — fields,
+# encoding, normalization — requires bumping this version, otherwise
+# retries already in flight across the change would spuriously conflict.
+CANONICAL_HASH_VERSION = 1
+
 
 def canonical_payload_hash(
     *,
+    prediction_id: uuid.UUID,
     actual_churn: bool,
     observed_at: datetime | None,
     expected_version: int,
@@ -50,15 +59,22 @@ def canonical_payload_hash(
 ) -> str:
     """SHA-256 of the canonical outcome payload bound to the key (ADR-0014).
 
-    Canonicalization is deterministic (sorted keys, compact separators,
-    datetimes in ISO format), so an equivalent retry hashes identically and
-    any semantic difference — including the presence or absence of the
-    event moment — does not.
+    The operation is (key, prediction, payload): the prediction id is part
+    of the material. Canonicalization is deterministic (sorted keys, compact
+    separators, datetimes in ISO format normalized to UTC), so an equivalent
+    retry hashes identically and any semantic difference — including the
+    target prediction or the presence of the event moment — does not.
     """
     payload = {
         "actual_churn": actual_churn,
         "expected_version": expected_version,
-        "observed_at": None if observed_at is None else observed_at.isoformat(),
+        "hash_version": CANONICAL_HASH_VERSION,
+        "observed_at": (
+            None
+            if observed_at is None
+            else observed_at.astimezone(UTC).isoformat()
+        ),
+        "prediction_id": str(prediction_id),
         "recorded_by": recorded_by,
     }
     canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -96,15 +112,18 @@ def apply_outcome(
     """Record or correct an outcome idempotently; returns (row, replay).
 
     ``replay`` distinguishes the call that performed the work (``False``)
-    from a retry answered with the stored result (``True``) — the payload
-    is semantically identical either way. A stale ``expected_version``
-    raises ``ConcurrencyConflictError``; a prospective negative before
-    window maturity raises ``OutcomeWindowNotMatureError``; an unknown
-    prediction raises ``PredictionNotFoundError``. A registry miss whose
-    insert loses the unique race re-reads the concurrent winner: the same
-    hash replays the winner's state, a different hash conflicts.
+    from a retry answered with the stored result (``True``). A retry is
+    bound to the same prediction: the same key against another prediction
+    conflicts even with an otherwise equivalent payload (the target takes
+    part in the canonical hash). A stale ``expected_version`` raises
+    ``ConcurrencyConflictError``; a prospective negative before window
+    maturity raises ``OutcomeWindowNotMatureError``; an unknown prediction
+    raises ``PredictionNotFoundError``. A registry miss whose insert loses
+    the unique race conflicts as well — different targets hash differently,
+    so the race loser cannot be a replay of the winner.
     """
     payload_hash = canonical_payload_hash(
+        prediction_id=prediction_id,
         actual_churn=actual_churn,
         observed_at=observed_at,
         expected_version=expected_version,
@@ -162,16 +181,9 @@ def apply_outcome(
         session.rollback()
         if violated_constraint(exc) != _KEY_UNIQUE:
             raise
-        # A concurrent writer with the same key committed first: the
-        # database picked the winner, this call answers the winner's state.
-        winner = session.scalar(
-            select(OutcomeIdempotency).where(
-                OutcomeIdempotency.idempotency_key == idempotency_key
-            )
-        )
-        if winner is None:  # pragma: no cover - unique loss implies a row
-            raise
-        if winner.payload_sha256 != payload_hash:
-            raise _conflict(idempotency_key) from exc
-        return _current_state(session, winner.prediction_id), True
+        # With the target in the canonical hash, an insert race can only
+        # happen between different predictions, whose hashes differ (the
+        # same-prediction race is arbitrated earlier by record_outcome's
+        # optimistic concurrency): the loser of the race always conflicts.
+        raise _conflict(idempotency_key) from exc
     return updated, False

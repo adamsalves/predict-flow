@@ -7,7 +7,7 @@ criteria of the issue; the HTTP mapping arrives with the route.
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 import sqlalchemy as sa
@@ -118,6 +118,7 @@ def test_apply_outcome_records_state_and_binds_key(db_session: Session) -> None:
     assert record.prediction_id == prediction.id
     assert record.resulted_version == 1
     assert record.payload_sha256 == canonical_payload_hash(
+        prediction_id=prediction.id,
         actual_churn=True,
         observed_at=OBSERVED_AT,
         expected_version=0,
@@ -194,6 +195,49 @@ def test_same_key_different_payload_conflicts(db_session: Session) -> None:
     )
     assert stored is not None
     assert stored.outcome_recorded_by == "analyst-a"  # untouched by the retry
+
+
+def test_same_key_same_payload_other_prediction_conflicts(
+    db_session: Session,
+) -> None:
+    """The operation is (key, prediction, payload): the same key with an
+    otherwise equivalent payload against another prediction conflicts
+    instead of replaying a state it never produced (issue #10 triage B1)."""
+    customer = register_customer(db_session, "C-OUT-CROSS")
+    first = _record(db_session, customer.id)
+    second = _record(db_session, customer.id)
+    applied, replay = apply_outcome(
+        db_session,
+        first.id,
+        idempotency_key="out-cross",
+        expected_version=0,
+        actual_churn=True,
+        recorded_by="analyst-a",
+        observed_at=OBSERVED_AT,
+    )
+    assert replay is False
+    with pytest.raises(IdempotencyConflictError):
+        apply_outcome(
+            db_session,
+            second.id,
+            idempotency_key="out-cross",
+            expected_version=0,
+            actual_churn=True,
+            recorded_by="analyst-a",
+            observed_at=OBSERVED_AT,
+        )
+    # The key stays bound to the operation it recorded; the second request
+    # learns about it through the conflict, never through a foreign state.
+    record = _registry_row(db_session, "out-cross")
+    assert record is not None
+    assert record.prediction_id == first.id
+    db_session.expire_all()
+    stored = db_session.scalar(
+        select(ChurnPrediction).where(ChurnPrediction.id == second.id)
+    )
+    assert stored is not None
+    assert stored.actual_churn is None
+    assert stored.outcome_version == 0
 
 
 def test_unknown_prediction_is_not_found(db_session: Session) -> None:
@@ -330,6 +374,7 @@ def test_concurrent_correction_conflicts_then_serializes(
 def test_canonical_payload_hash_is_deterministic() -> None:
     # Same values, built in a different argument order: same hash.
     first = canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=True,
         observed_at=OBSERVED_AT,
         expected_version=3,
@@ -340,38 +385,82 @@ def test_canonical_payload_hash_is_deterministic() -> None:
         expected_version=3,
         observed_at=OBSERVED_AT,
         actual_churn=True,
+        prediction_id=uuid.UUID(int=1),
     )
     assert first == second
     assert len(first) == 64
-    # Any semantic difference — event moment, author, version, verdict or
-    # the presence of the event moment — is a different operation.
+    # Any semantic difference — target prediction, event moment, author,
+    # version, verdict or the presence of the event moment — is a
+    # different operation.
     assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=2),
+        actual_churn=True,
+        observed_at=OBSERVED_AT,
+        expected_version=3,
+        recorded_by="analyst-a",
+    )
+    assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=True,
         observed_at=None,
         expected_version=3,
         recorded_by="analyst-a",
     )
     assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=True,
         observed_at=OBSERVED_AT + timedelta(days=1),
         expected_version=3,
         recorded_by="analyst-a",
     )
     assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=True,
         observed_at=OBSERVED_AT,
         expected_version=3,
         recorded_by="analyst-b",
     )
     assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=True,
         observed_at=OBSERVED_AT,
         expected_version=4,
         recorded_by="analyst-a",
     )
     assert first != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
         actual_churn=False,
         observed_at=OBSERVED_AT,
         expected_version=3,
+        recorded_by="analyst-a",
+    )
+
+
+def test_canonical_payload_hash_normalizes_timezones() -> None:
+    """The same instant at different UTC offsets is the same event moment:
+    the canonical form normalizes to UTC before hashing (issue #10, S1)."""
+    utc = canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
+        actual_churn=True,
+        observed_at=datetime(2026, 2, 1, 12, 0, tzinfo=UTC),
+        expected_version=0,
+        recorded_by="analyst-a",
+    )
+    shifted = canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
+        actual_churn=True,
+        observed_at=datetime(
+            2026, 2, 1, 15, 0, tzinfo=timezone(timedelta(hours=3))
+        ),
+        expected_version=0,
+        recorded_by="analyst-a",
+    )
+    assert utc == shifted
+    # A genuinely different instant still hashes differently.
+    assert utc != canonical_payload_hash(
+        prediction_id=uuid.UUID(int=1),
+        actual_churn=True,
+        observed_at=datetime(2026, 2, 1, 12, 0, tzinfo=timezone(timedelta(hours=3))),
+        expected_version=0,
         recorded_by="analyst-a",
     )

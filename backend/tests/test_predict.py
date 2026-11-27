@@ -7,14 +7,17 @@ scores (ADR-0009), and the persisted audit row.
 
 import json
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.main import app
 from app.models import ChurnPrediction, Customer
 from app.schemas.manifest import ModelManifest
@@ -118,6 +121,46 @@ def test_customer_prediction_is_current_and_registers_identity(
         engine.dispose()
     assert customer is not None
     assert row.customer_id == customer.id
+
+
+def test_prospective_prediction_persists_simulated_outcome_window(
+    predict_client: TestClient, migrated_db_url: str
+) -> None:
+    """Prospective rows carry the server-stamped window (issue #10).
+
+    The window is what the database maturity CHECK measures a prospective
+    "did not churn" against (ADR-0005); it must never be client-supplied.
+    """
+    key = _key()
+    resp = _predict(predict_client, dict(SAMPLE_INPUT), key)
+    assert resp.status_code == 201
+    row = _row_by_key(migrated_db_url, key)
+    assert row is not None
+    assert row.outcome_window_start == row.score_at
+    assert row.outcome_window_end is not None
+    assert row.outcome_window_end - row.score_at == timedelta(days=90)
+
+
+def test_outcome_window_days_honors_env_override(
+    predict_client: TestClient,
+    migrated_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OUTCOME_WINDOW_DAYS", "7")
+    get_settings.cache_clear()
+    key = _key()
+    resp = _predict(predict_client, dict(SAMPLE_INPUT), key)
+    assert resp.status_code == 201
+    row = _row_by_key(migrated_db_url, key)
+    assert row is not None
+    assert row.outcome_window_end is not None
+    assert row.outcome_window_end - row.score_at == timedelta(days=7)
+
+
+def test_outcome_window_days_rejects_non_positive_values() -> None:
+    for invalid in (0, -30):
+        with pytest.raises(ValidationError):
+            Settings(OUTCOME_WINDOW_DAYS=invalid)
 
 
 def test_missing_feature_is_422(predict_client: TestClient) -> None:

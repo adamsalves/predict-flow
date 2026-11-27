@@ -19,6 +19,11 @@ class Settings(BaseSettings):  # type: ignore[explicit-any]
     # excess requests fail fast with 429 instead of queueing in the
     # threadpool.
     PREDICT_MAX_CONCURRENCY: int = Field(default=2, ge=1)
+    # Simulated outcome window for prospective predictions (issue #10,
+    # ADR-0005/0009): the API stamps outcome_window_start/end relative to
+    # score_at and never accepts a window from the client. A prospective
+    # "did not churn" is only accepted after this window has matured.
+    OUTCOME_WINDOW_DAYS: int = Field(default=90, gt=0)
     MODEL_PATH: str = "/models"
     # Active model version (ADR-0003): activation and rollback are config
     # changes plus a process restart, never runtime hot-swaps.

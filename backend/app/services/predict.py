@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import session as db_session
+from app.db.constraints import violated_constraint
 from app.models import ChurnPrediction, DataOrigin, JsonValue
 from app.schemas.explanation import (
     LocalExplanation,
@@ -88,13 +89,6 @@ def _conflict(key: str) -> IdempotencyConflictError:
 # Partial unique index that arbitrates the activation race per
 # (customer, origin): the database is the final protection (ADR-0014).
 _CURRENT_PREDICTION_INDEX = "uq_churn_predictions_current"
-
-
-def _violated_constraint(exc: IntegrityError) -> str | None:
-    """Constraint name reported by the driver, when available."""
-    diag = getattr(exc.orig, "diag", None)
-    name: str | None = getattr(diag, "constraint_name", None)
-    return name
 
 
 def _response_from_row(loaded: LoadedModel, row: ChurnPrediction) -> PredictResponse:
@@ -214,7 +208,7 @@ def predict(
             )
         except IntegrityError as exc:
             session.rollback()
-            if _violated_constraint(exc) == _CURRENT_PREDICTION_INDEX:
+            if violated_constraint(exc) == _CURRENT_PREDICTION_INDEX:
                 # The activation race for (customer, origin) was lost: a
                 # concurrent request committed first. Nothing from this
                 # call was persisted, so retrying with the same key is

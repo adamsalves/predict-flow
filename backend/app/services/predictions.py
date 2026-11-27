@@ -17,7 +17,7 @@ from sqlalchemy import case, select, update
 from sqlalchemy.orm import Session
 
 from app.models import ChurnPrediction, DataOrigin, JsonValue
-from app.services.errors import ConcurrencyConflictError
+from app.services.errors import ConcurrencyConflictError, PredictionNotFoundError
 
 
 def find_by_idempotency_key(session: Session, key: str) -> ChurnPrediction | None:
@@ -161,7 +161,7 @@ def record_outcome(
             select(ChurnPrediction.id).where(ChurnPrediction.id == prediction_id)
         )
         if exists is None:
-            raise ValueError(f"unknown prediction: {prediction_id}")
+            raise PredictionNotFoundError(f"prediction {prediction_id} was not found")
         raise ConcurrencyConflictError(
             f"outcome of {prediction_id} was changed concurrently;"
             f" expected version {expected_version}"
@@ -175,5 +175,5 @@ def record_outcome(
         .execution_options(populate_existing=True)
     )
     if prediction is None:  # pragma: no cover - committed row must exist
-        raise ValueError(f"unknown prediction: {prediction_id}")
+        raise PredictionNotFoundError(f"prediction {prediction_id} was not found")
     return prediction

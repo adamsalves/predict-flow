@@ -6,7 +6,9 @@ are arbitrated by the database. Proofs cover the service-level acceptance
 criteria of the issue; the HTTP mapping arrives with the route.
 """
 
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -464,3 +466,202 @@ def test_canonical_payload_hash_normalizes_timezones() -> None:
         expected_version=0,
         recorded_by="analyst-a",
     )
+
+
+def _apply_with_key(
+    session: Session,
+    prediction_id: uuid.UUID,
+    key: str,
+) -> tuple[ChurnPrediction, bool]:
+    return apply_outcome(
+        session,
+        prediction_id,
+        idempotency_key=key,
+        expected_version=0,
+        actual_churn=True,
+        recorded_by="analyst",
+    )
+
+
+def test_registry_insert_race_on_other_prediction_conflicts(
+    migrated_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same key, same payload, different predictions, deterministic
+    rendezvous at the registry insert: the unique constraint — not timing —
+    picks the winner, and the loser conflicts (issue #10 triage B1: with
+    the target in the canonical hash, different targets hash differently,
+    so the race loser can never be a replay of the winner)."""
+    engine = create_engine(migrated_db_url)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        setup = factory()
+        customer_a = register_customer(setup, f"C-OUT-RACE-A-{uuid.uuid4().hex[:8]}")
+        customer_b = register_customer(setup, f"C-OUT-RACE-B-{uuid.uuid4().hex[:8]}")
+        prediction_a = _record(setup, customer_a.id)
+        prediction_b = _record(setup, customer_b.id)
+        setup.close()
+
+        first = factory()
+        second = factory()
+        key = f"out-race-{uuid.uuid4().hex[:8]}"
+        barrier = threading.Barrier(2)
+        real_commit = Session.commit
+
+        def barrier_commit(self: Session) -> None:
+            # Hold both registry commits until each transaction holds a
+            # committed outcome and a pending record (lesson from #52:
+            # deterministic race, no sleeps).
+            if any(isinstance(obj, OutcomeIdempotency) for obj in self.new):
+                barrier.wait(timeout=10)
+            real_commit(self)
+
+        monkeypatch.setattr(Session, "commit", barrier_commit)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(_apply_with_key, first, prediction_a.id, key),
+                    pool.submit(_apply_with_key, second, prediction_b.id, key),
+                ]
+                outcomes: list[
+                    tuple[ChurnPrediction, bool] | IdempotencyConflictError
+                ] = []
+                for future in futures:
+                    try:
+                        outcomes.append(future.result())
+                    except IdempotencyConflictError as exc:
+                        outcomes.append(exc)
+            winner, winner_replay = next(
+                entry for entry in outcomes if isinstance(entry, tuple)
+            )
+            loser_conflict = next(
+                entry
+                for entry in outcomes
+                if isinstance(entry, IdempotencyConflictError)
+            )
+            assert winner_replay is False
+            assert isinstance(loser_conflict, IdempotencyConflictError)
+            assert winner.outcome_version == 1
+
+            check = factory()
+            try:
+                records = check.scalars(
+                    select(OutcomeIdempotency).where(
+                        OutcomeIdempotency.idempotency_key == key
+                    )
+                ).all()
+                assert len(records) == 1
+                assert records[0].prediction_id == winner.id
+                assert records[0].resulted_version == 1
+                assert records[0].payload_sha256 == canonical_payload_hash(
+                    prediction_id=winner.id,
+                    actual_churn=True,
+                    observed_at=None,
+                    expected_version=0,
+                    recorded_by="analyst",
+                )
+            finally:
+                _cleanup_customers(check, customer_a.id, customer_b.id)
+                check.close()
+        finally:
+            first.close()
+            second.close()
+    finally:
+        engine.dispose()
+
+
+def test_registry_insert_race_with_different_payload_conflicts(
+    migrated_db_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same race, different payload behind the same key: the loser of the
+    insert race conflicts (issue #10, ADR-0014) instead of answering a
+    state its payload never produced."""
+    engine = create_engine(migrated_db_url)
+    try:
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        setup = factory()
+        customer_a = register_customer(setup, f"C-OUT-CONF-A-{uuid.uuid4().hex[:8]}")
+        customer_b = register_customer(setup, f"C-OUT-CONF-B-{uuid.uuid4().hex[:8]}")
+        prediction_a = _record(setup, customer_a.id)
+        prediction_b = _record(setup, customer_b.id)
+        setup.close()
+
+        first = factory()
+        second = factory()
+        key = f"out-conf-race-{uuid.uuid4().hex[:8]}"
+        barrier = threading.Barrier(2)
+        real_commit = Session.commit
+
+        def barrier_commit(self: Session) -> None:
+            if any(isinstance(obj, OutcomeIdempotency) for obj in self.new):
+                barrier.wait(timeout=10)
+            real_commit(self)
+
+        monkeypatch.setattr(Session, "commit", barrier_commit)
+
+        def apply_variant(
+            session: Session,
+            prediction_id: uuid.UUID,
+            recorded_by: str,
+        ) -> tuple[ChurnPrediction, bool]:
+            return apply_outcome(
+                session,
+                prediction_id,
+                idempotency_key=key,
+                expected_version=0,
+                actual_churn=True,
+                recorded_by=recorded_by,
+            )
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    pool.submit(apply_variant, first, prediction_a.id, "analyst-a"),
+                    pool.submit(apply_variant, second, prediction_b.id, "analyst-b"),
+                ]
+                outcomes: list[
+                    tuple[ChurnPrediction, bool] | IdempotencyConflictError
+                ] = []
+                for future in futures:
+                    try:
+                        outcomes.append(future.result())
+                    except IdempotencyConflictError as exc:
+                        outcomes.append(exc)
+            winner, winner_replay = next(
+                entry for entry in outcomes if isinstance(entry, tuple)
+            )
+            loser_conflict = next(
+                entry
+                for entry in outcomes
+                if isinstance(entry, IdempotencyConflictError)
+            )
+            assert winner_replay is False
+            assert isinstance(loser_conflict, IdempotencyConflictError)
+            check = factory()
+            try:
+                # Exactly one registry row, bound to the winner's payload.
+                records = check.scalars(
+                    select(OutcomeIdempotency).where(
+                        OutcomeIdempotency.idempotency_key == key
+                    )
+                ).all()
+                assert len(records) == 1
+                assert records[0].prediction_id == winner.id
+                assert records[0].payload_sha256 == canonical_payload_hash(
+                    prediction_id=winner.id,
+                    actual_churn=True,
+                    observed_at=None,
+                    expected_version=0,
+                    recorded_by="analyst-a"
+                    if winner.id == prediction_a.id
+                    else "analyst-b",
+                )
+            finally:
+                _cleanup_customers(check, customer_a.id, customer_b.id)
+                check.close()
+        finally:
+            first.close()
+            second.close()
+    finally:
+        engine.dispose()

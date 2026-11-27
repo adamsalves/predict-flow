@@ -7,7 +7,12 @@ from alembic import command
 
 from tests.conftest import _alembic_config
 
-DOMAIN_TABLES = {"customers", "customer_services", "churn_predictions"}
+DOMAIN_TABLES = {
+    "customers",
+    "customer_services",
+    "churn_predictions",
+    "outcome_idempotency",
+}
 
 EXPECTED_INDEXES = {
     "churn_predictions": {

@@ -23,7 +23,11 @@ Deliberate leniencies: ``risk_band`` is the provisional binary band tied to
 the provisional threshold (the final decision policy is issue #11,
 ADR-0011), and the outcome window is only checked for internal coherence —
 demo/backfill timelines are simulated, so no CHECK ties the window to
-``score_at``.
+``score_at``. Prospective API predictions do carry a window stamped by
+the server (``score_at`` .. ``score_at + OUTCOME_WINDOW_DAYS``; issue #10,
+ADR-0005/0009); rows written before that issue (and non-prospective rows)
+stay without one, and the maturity CHECK then simply rejects a
+prospective negative on them.
 """
 
 from __future__ import annotations

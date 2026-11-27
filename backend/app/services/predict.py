@@ -16,6 +16,13 @@ The orchestration keeps expensive work outside database sessions (ADR-0014):
    (different payload), and a lost activation race for the same customer
    surfaces as a retryable 409, never a duplicate.
 
+Persisted prospective rows also carry the simulated outcome window
+(``outcome_window_start = score_at``, ``outcome_window_end = score_at +
+OUTCOME_WINDOW_DAYS``; issue #10, ADR-0005/0009). The window is stamped
+by the server — never client-supplied — so the database maturity CHECK
+can reject a prospective "did not churn" recorded before the window has
+fully elapsed.
+
 A persistence failure after inference never returns an audited success:
 the error propagates, the prediction is not committed, and a retry with
 the same key recomputes the (deterministic) result and commits it once.
@@ -29,12 +36,13 @@ import hashlib
 import json
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db import session as db_session
 from app.models import ChurnPrediction, DataOrigin, JsonValue
 from app.schemas.explanation import (
@@ -164,6 +172,17 @@ def predict(
 
     threshold = loaded.manifest.model.threshold.value
     risk_band = "high" if probability >= threshold else "low"
+    score_at = datetime.now(UTC)
+    data_origin = DataOrigin.PROSPECTIVE
+    outcome_window_start: datetime | None = None
+    outcome_window_end: datetime | None = None
+    if data_origin == DataOrigin.PROSPECTIVE:
+        # Simulated window (issue #10): derived from config, never accepted
+        # from the client; a prospective negative only matures after it.
+        outcome_window_start = score_at
+        outcome_window_end = score_at + timedelta(
+            days=get_settings().OUTCOME_WINDOW_DAYS
+        )
     feature_snapshot: dict[str, JsonValue] = {
         name: value for name, value in features.items()
     }
@@ -186,8 +205,10 @@ def predict(
                 feature_schema_version=FEATURE_SCHEMA_VERSION,
                 feature_schema_digest=feature_schema_digest(),
                 factors_schema_digest=factors_schema_digest(),
-                data_origin=DataOrigin.PROSPECTIVE,
-                score_at=datetime.now(UTC),
+                data_origin=data_origin,
+                score_at=score_at,
+                outcome_window_start=outcome_window_start,
+                outcome_window_end=outcome_window_end,
                 idempotency_key=idempotency_key,
                 request_payload_sha256=payload_hash,
             )

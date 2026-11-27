@@ -124,6 +124,25 @@ curl -X POST http://127.0.0.1:8000/api/v1/predict \
   }'
 ```
 
+## Outcome: `PATCH /api/v1/predictions/{id}/outcome` (issue #10)
+
+Registro/correção do outcome de uma predição, idempotente e auditável (ADR-0005/0014):
+
+- **Body**: `actual_churn` (bool), `observed_at` (opcional — o Telco não tem momento do evento; quando presente, exige offset UTC explícito: naive é 422), `expected_version` (int ≥ 0 — concorrência otimista) e `recorded_by` (autor auto-declarado enquanto a #17 não existe: trim, não vazio, ≤128; entra no hash canônico). A **origem nunca vem do cliente** — é derivada da predição (ADR-0006); campos extras são rejeitados (422).
+- **`Idempotency-Key` obrigatória** (mesma regra do POST): a operação é (chave, predição, payload) — retry equivalente da mesma predição → **200** byte-idêntico sem reexecutar o update; mesma chave com payload divergente **ou** contra outra predição → **409** `idempotency_conflict`.
+- **Concorrência otimista**: `expected_version` obsoleto → **409** `concurrency_conflict`, sem perder update. A resposta inclui `outcome.outcome_version` — leia daqui para montar o próximo PATCH.
+- **Maturidade (ADR-0005)**: `actual_churn=false` prospectivo antes da janela completa → **409** `outcome_window_not_mature`, e a predição permanece censurada (`actual_churn` nulo nunca vira negativo confirmado).
+- **404** `prediction_not_found` para id desconhecido. A primeira gravação seta `outcome_recorded_at`; correções a preservam e setam `outcome_updated_at` (linha do tempo administrativa, ADR-0005/0006).
+
+Exemplo (continuando o POST acima):
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/v1/predictions/<prediction_id>/outcome \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: outcome-0001' \
+  -d '{"actual_churn": true, "observed_at": "2026-03-01T12:00:00Z", "expected_version": 0, "recorded_by": "analyst-a"}'
+```
+
 ## Testes
 
 Com Python 3.12+:
